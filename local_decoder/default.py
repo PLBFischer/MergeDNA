@@ -24,17 +24,15 @@ class LocalDecoder(nn.Module):
         vocab_size: int = 6,
         embed_dim: int = 1024,
         num_heads: int = 16,
-        head_dim: int = 64,
         ffn_dim: int = 2752,
         num_layers: int = 2,
         local_window_size: int = 16,
         max_seq_len: int = 4096,
-        dropout: float = 0.0,
     ):
         super().__init__()
         self.register_buffer(
             "rope_freqs",
-            precompute_rope_freqs(head_dim, max_seq_len),
+            precompute_rope_freqs(embed_dim // num_heads, max_seq_len),
             persistent=False,
         )
 
@@ -42,10 +40,8 @@ class LocalDecoder(nn.Module):
             LocalAttentionBlock(
                 dim=embed_dim,
                 num_heads=num_heads,
-                head_dim=head_dim,
                 ffn_dim=ffn_dim,
                 window_size=local_window_size,
-                dropout=dropout,
             )
             for _ in range(num_layers)
         ])

@@ -53,7 +53,6 @@ class Trainer:
         self.log_interval = log_interval
         self.save_every_n_epochs = save_every_n_epochs
         self.grad_clip = grad_clip
-        self.per_gpu_batch_size = per_gpu_batch_size
         self.logger = logging.getLogger(__name__)
 
     def train(

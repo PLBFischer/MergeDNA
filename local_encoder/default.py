@@ -22,13 +22,11 @@ class LocalEncoder(nn.Module):
         pad_token_id: int = 0,
         embed_dim: int = 1024,
         num_heads: int = 16,
-        head_dim: int = 64,
         ffn_dim: int = 2752,
         num_layers: int = 4,
         local_window_size: int = 16,
         merge_group_dim: int = 64,
         max_seq_len: int = 4096,
-        dropout: float = 0.0,
         compression_ratio_mean: float = 0.5,
         compression_ratio_min: float = 0.4,
         compression_ratio_max: float = 0.6,
@@ -43,7 +41,7 @@ class LocalEncoder(nn.Module):
         self.token_embed = nn.Embedding(vocab_size, embed_dim, padding_idx=pad_token_id)
         self.register_buffer(
             "rope_freqs",
-            precompute_rope_freqs(head_dim, max_seq_len),
+            precompute_rope_freqs(embed_dim // num_heads, max_seq_len),
             persistent=False,
         )
 
@@ -51,11 +49,9 @@ class LocalEncoder(nn.Module):
             LocalToMeAttentionBlock(
                 dim=embed_dim,
                 num_heads=num_heads,
-                head_dim=head_dim,
                 ffn_dim=ffn_dim,
                 window_size=local_window_size,
                 merge_group_dim=merge_group_dim,
-                dropout=dropout,
             )
             for _ in range(num_layers)
         ])

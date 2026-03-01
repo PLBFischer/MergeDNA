@@ -1,3 +1,4 @@
 _target_: dataset.default.DNADataset
 txt_path: ???
 max_seq_len: ${experiment.max_seq_len}
+dataset_len: 1000
