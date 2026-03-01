@@ -1,6 +1,7 @@
 import random
 from typing import List
 
+import torch
 from torch.utils.data import Dataset
 
 from utils.dna import encode_sequence
