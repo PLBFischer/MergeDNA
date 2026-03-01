@@ -4,3 +4,4 @@ log_interval: 50
 save_every_n_epochs: 5
 grad_clip: 1.0
 per_gpu_batch_size: 8
+amp_dtype: bfloat16  # float16, bfloat16, or null to disable

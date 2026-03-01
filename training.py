@@ -11,6 +11,7 @@ import math
 import os
 import time
 from pathlib import Path
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -49,11 +50,13 @@ class Trainer:
         save_every_n_epochs: int = 5,
         grad_clip: float = 1.0,
         per_gpu_batch_size: int = 8,
+        amp_dtype: Optional[str] = "bfloat16",
     ):
         self.total_epochs = total_epochs
         self.log_interval = log_interval
         self.save_every_n_epochs = save_every_n_epochs
         self.grad_clip = grad_clip
+        self.amp_dtype = amp_dtype
         self.logger = logging.getLogger(__name__)
 
     def train(
@@ -90,6 +93,25 @@ class Trainer:
         device = next(local_encoder.parameters()).device
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+        # ---- AMP setup ----
+        is_cuda = device.type == "cuda"
+        if self.amp_dtype and is_cuda:
+            torch_dtype = torch.bfloat16 if self.amp_dtype == "bfloat16" else torch.float16
+        else:
+            torch_dtype = None
+
+        # GradScaler is only needed for float16 (bfloat16 has full float32 range).
+        scaler = (
+            torch.amp.GradScaler("cuda")
+            if torch_dtype == torch.float16
+            else None
+        )
+        autocast_ctx = (
+            torch.amp.autocast(device_type="cuda", dtype=torch_dtype)
+            if torch_dtype is not None
+            else torch.amp.autocast(device_type="cuda", enabled=False)
+        )
+
         components = {
             "local_encoder": local_encoder,
             "latent_encoder": latent_encoder,
@@ -98,15 +120,16 @@ class Trainer:
         }
 
         start_epoch, global_step = self._maybe_resume(
-            output_dir, components, optimizer, scheduler,
+            output_dir, components, optimizer, scheduler, scaler,
         )
 
         for comp in components.values():
             comp.train()
 
+        amp_label = str(torch_dtype).split(".")[-1] if torch_dtype else "disabled"
         self.logger.info(
             f"Starting training from epoch {start_epoch}, step {global_step} "
-            f"on {device} (target {self.total_epochs} epochs)"
+            f"on {device} (target {self.total_epochs} epochs) | AMP: {amp_label}"
         )
 
         for epoch in range(start_epoch, self.total_epochs):
@@ -116,18 +139,27 @@ class Trainer:
             for batch_idx, batch in enumerate(dataloader):
                 optimizer.zero_grad(set_to_none=True)
 
-                loss, losses = loss_manager.loss(
-                    local_encoder, latent_encoder, latent_decoder, local_decoder,
-                    batch, device,
-                )
-                loss.backward()
+                with autocast_ctx:
+                    loss, losses = loss_manager.loss(
+                        local_encoder, latent_encoder, latent_decoder, local_decoder,
+                        batch, device,
+                    )
 
                 all_params = []
                 for comp in components.values():
                     all_params.extend(comp.parameters())
-                torch.nn.utils.clip_grad_norm_(all_params, self.grad_clip)
 
-                optimizer.step()
+                if scaler is not None:
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(all_params, self.grad_clip)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(all_params, self.grad_clip)
+                    optimizer.step()
+
                 scheduler.step()
 
                 running_loss += loss.item()
@@ -171,12 +203,12 @@ class Trainer:
             if (epoch + 1) % self.save_every_n_epochs == 0:
                 self._save_checkpoint(
                     output_dir, epoch + 1, global_step, components,
-                    optimizer, scheduler,
+                    optimizer, scheduler, scaler,
                 )
 
         self._save_checkpoint(
             output_dir, self.total_epochs, global_step, components,
-            optimizer, scheduler, is_final=True,
+            optimizer, scheduler, scaler, is_final=True,
         )
         self.logger.info(
             f"Training complete: {self.total_epochs} epochs, "
@@ -188,7 +220,7 @@ class Trainer:
 
     def _save_checkpoint(
         self, output_dir, epoch, global_step, components,
-        optimizer, scheduler, is_final=False,
+        optimizer, scheduler, scaler=None, is_final=False,
     ):
         tag = "final" if is_final else f"epoch_{epoch}"
         path = os.path.join(output_dir, f"checkpoint_{tag}.pt")
@@ -199,6 +231,8 @@ class Trainer:
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
         }
+        if scaler is not None:
+            state["scaler"] = scaler.state_dict()
         for name, comp in components.items():
             module = comp.module if hasattr(comp, "module") else comp
             state[name] = module.state_dict()
@@ -206,7 +240,7 @@ class Trainer:
         torch.save(state, path)
         self.logger.info(f"Saved checkpoint to {path}")
 
-    def _maybe_resume(self, output_dir, components, optimizer, scheduler):
+    def _maybe_resume(self, output_dir, components, optimizer, scheduler, scaler=None):
         """Look for the latest checkpoint in output_dir and resume.
 
         Returns:
@@ -243,5 +277,7 @@ class Trainer:
             optimizer.load_state_dict(ckpt["optimizer"])
         if "scheduler" in ckpt:
             scheduler.load_state_dict(ckpt["scheduler"])
+        if scaler is not None and "scaler" in ckpt:
+            scaler.load_state_dict(ckpt["scaler"])
 
         return ckpt.get("epoch", 0), ckpt.get("global_step", 0)
