@@ -135,7 +135,7 @@ class LossManager:
         weights = 1.0 / (group_sizes + 1e-8)  # (B, K)
 
         w_per_base = torch.bmm(
-            weights.unsqueeze(1) / (group_sizes.unsqueeze(1) + 1e-8),
+            weights.unsqueeze(1),
             source_prime.float(),
         ).squeeze(1)  # (B, N_orig)
 

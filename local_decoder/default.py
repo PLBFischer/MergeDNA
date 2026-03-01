@@ -45,7 +45,6 @@ class LocalDecoder(nn.Module):
             )
             for _ in range(num_layers)
         ])
-        self.norm = RMSNorm(embed_dim)
         self.final_norm = RMSNorm(embed_dim)
         self.output_head = nn.Linear(embed_dim, vocab_size, bias=False)
 
@@ -72,7 +71,6 @@ class LocalDecoder(nn.Module):
         )
         for block in self.blocks:
             z_n = block(z_n, self.rope_freqs, base_pos)
-        z_n = self.norm(z_n)
         return self.output_head(self.final_norm(z_n))
 
     def loss(
