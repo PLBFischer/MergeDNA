@@ -100,9 +100,13 @@ class TokenMergeModule(nn.Module):
                     break
 
         if len(sel_i) < r:
-            # Greedy can get stuck in a maximal-but-not-maximum matching.
-            # Augment by scanning left-to-right for unmatched adjacent pairs,
-            # keeping all similarity-based pairs already found.
+            # Greedy can get stuck in a maximal-but-not-maximum matching
+            # (e.g. picking pair (1,2) from [0,1,2,3] blocks both 0 and 3).
+            # Fall back to a fresh left-to-right scan which is guaranteed
+            # to find floor(S/2) >= r disjoint adjacent pairs.
+            used = set()
+            sel_i = []
+            sel_j = []
             for i in range(S - 1):
                 if len(sel_i) == r:
                     break
