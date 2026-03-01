@@ -1,4 +1,5 @@
 defaults:
+  - experiment: default
   - dataset: default
   - local_encoder: default
   - latent_encoder: default

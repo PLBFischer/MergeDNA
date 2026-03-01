@@ -10,7 +10,6 @@ Usage (multi-GPU, 8 GPUs):
 
 import logging
 import os
-from pathlib import Path
 
 import hydra
 import torch
@@ -18,6 +17,8 @@ import torch.distributed as dist
 from omegaconf import DictConfig, OmegaConf
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
+
+from utils.hash_utils import get_output_dir
 
 
 def setup_distributed():
@@ -89,9 +90,8 @@ def main(cfg: DictConfig):
 
         # ---- Output directory ----
         original_cwd = hydra.utils.get_original_cwd()
-        output_dir = os.path.join(original_cwd, "outputs")
-        if is_main:
-            Path(output_dir).mkdir(parents=True, exist_ok=True)
+        base_dir = os.path.join(original_cwd, "outputs")
+        output_dir = get_output_dir(cfg, base_dir=base_dir, create_dir=is_main)
 
         # ---- Train ----
         output_dir, stats = trainer.train(
