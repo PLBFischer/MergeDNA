@@ -21,17 +21,15 @@ class LatentEncoder(nn.Module):
         self,
         embed_dim: int = 1024,
         num_heads: int = 16,
-        head_dim: int = 64,
         ffn_dim: int = 2752,
         num_layers: int = 20,
         merge_group_dim: int = 64,
         max_seq_len: int = 4096,
-        dropout: float = 0.0,
     ):
         super().__init__()
         self.register_buffer(
             "rope_freqs",
-            precompute_rope_freqs(head_dim, max_seq_len),
+            precompute_rope_freqs(embed_dim // num_heads, max_seq_len),
             persistent=False,
         )
 
@@ -39,9 +37,7 @@ class LatentEncoder(nn.Module):
             TransformerBlock(
                 dim=embed_dim,
                 num_heads=num_heads,
-                head_dim=head_dim,
                 ffn_dim=ffn_dim,
-                dropout=dropout,
             )
             for _ in range(num_layers)
         ])

@@ -10,7 +10,7 @@ Attention implementations for MergeDNA.
 Both modules follow LLaMA conventions (no bias, RoPE applied externally).
 """
 
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -19,27 +19,6 @@ import torch.nn.functional as F
 from flash_attn import flash_attn_func
 
 from model.layers import apply_rope
-
-
-class _QKVProj(nn.Module):
-    """Separate Q / K / V linear projections (no bias, LLaMA-style)."""
-
-    def __init__(self, dim: int, num_heads: int, head_dim: int):
-        super().__init__()
-        self.num_heads = num_heads
-        self.head_dim = head_dim
-        self.wq = nn.Linear(dim, num_heads * head_dim, bias=False)
-        self.wk = nn.Linear(dim, num_heads * head_dim, bias=False)
-        self.wv = nn.Linear(dim, num_heads * head_dim, bias=False)
-
-    def forward(
-        self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        B, S, _ = x.shape
-        q = self.wq(x).view(B, S, self.num_heads, self.head_dim)
-        k = self.wk(x).view(B, S, self.num_heads, self.head_dim)
-        v = self.wv(x).view(B, S, self.num_heads, self.head_dim)
-        return q, k, v
 
 
 class FullAttention(nn.Module):
@@ -52,15 +31,14 @@ class FullAttention(nn.Module):
         self,
         dim: int,
         num_heads: int,
-        head_dim: int,
-        dropout: float = 0.0,
     ):
         super().__init__()
         self.num_heads = num_heads
-        self.head_dim = head_dim
-        self.qkv = _QKVProj(dim, num_heads, head_dim)
-        self.wo = nn.Linear(num_heads * head_dim, dim, bias=False)
-        self.dropout = dropout
+        self.head_dim = dim // num_heads
+        self.wq = nn.Linear(dim, dim, bias=False)
+        self.wk = nn.Linear(dim, dim, bias=False)
+        self.wv = nn.Linear(dim, dim, bias=False)
+        self.wo = nn.Linear(dim, dim, bias=False)
 
     def forward(
         self,
@@ -69,7 +47,9 @@ class FullAttention(nn.Module):
         position_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         B, S, _ = x.shape
-        q, k, v = self.qkv(x)
+        q = self.wq(x).view(B, S, self.num_heads, self.head_dim)
+        k = self.wk(x).view(B, S, self.num_heads, self.head_dim)
+        v = self.wv(x).view(B, S, self.num_heads, self.head_dim)
 
         if rope_freqs is not None:
             if position_ids is None:
@@ -86,11 +66,7 @@ class FullAttention(nn.Module):
             q = q_r.permute(0, 2, 1, 3)
             k = k_r.permute(0, 2, 1, 3)
 
-        attn_out = flash_attn_func(
-            q, k, v,
-            dropout_p=self.dropout if self.training else 0.0,
-            causal=False,
-        )
+        attn_out = flash_attn_func(q, k, v, causal=False)
         out = attn_out.reshape(B, S, self.num_heads * self.head_dim)
         return self.wo(out)
 
@@ -108,17 +84,16 @@ class LocalWindowAttention(nn.Module):
         self,
         dim: int,
         num_heads: int,
-        head_dim: int,
         window_size: int = 16,
-        dropout: float = 0.0,
     ):
         super().__init__()
         self.window_size = window_size
         self.num_heads = num_heads
-        self.head_dim = head_dim
-        self.qkv = _QKVProj(dim, num_heads, head_dim)
-        self.wo = nn.Linear(num_heads * head_dim, dim, bias=False)
-        self.dropout = dropout
+        self.head_dim = dim // num_heads
+        self.wq = nn.Linear(dim, dim, bias=False)
+        self.wk = nn.Linear(dim, dim, bias=False)
+        self.wv = nn.Linear(dim, dim, bias=False)
+        self.wo = nn.Linear(dim, dim, bias=False)
 
     def forward(
         self,
@@ -138,7 +113,9 @@ class LocalWindowAttention(nn.Module):
         n_windows = S_padded // W
 
         x_win = x.reshape(B * n_windows, W, D)
-        q, k, v = self.qkv(x_win)
+        q = self.wq(x_win).view(B * n_windows, W, self.num_heads, self.head_dim)
+        k = self.wk(x_win).view(B * n_windows, W, self.num_heads, self.head_dim)
+        v = self.wv(x_win).view(B * n_windows, W, self.num_heads, self.head_dim)
 
         if rope_freqs is not None:
             if position_ids is None:
@@ -166,11 +143,7 @@ class LocalWindowAttention(nn.Module):
             q = q_r.permute(0, 2, 1, 3)
             k = k_r.permute(0, 2, 1, 3)
 
-        attn_out = flash_attn_func(
-            q, k, v,
-            dropout_p=self.dropout if self.training else 0.0,
-            causal=False,
-        )  # (B*n_win, W, H, hd)
+        attn_out = flash_attn_func(q, k, v, causal=False)  # (B*n_win, W, H, hd)
 
         attn_out = attn_out.reshape(B, S_padded, self.num_heads * self.head_dim)
         out = self.wo(attn_out)

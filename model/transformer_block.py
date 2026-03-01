@@ -19,15 +19,13 @@ class TransformerBlock(nn.Module):
         self,
         dim: int,
         num_heads: int,
-        head_dim: int,
         ffn_dim: int,
-        dropout: float = 0.0,
     ):
         super().__init__()
         self.norm1 = RMSNorm(dim)
-        self.attn = FullAttention(dim, num_heads, head_dim, dropout=dropout)
+        self.attn = FullAttention(dim, num_heads)
         self.norm2 = RMSNorm(dim)
-        self.ffn = SwiGLUFFN(dim, ffn_dim, dropout=dropout)
+        self.ffn = SwiGLUFFN(dim, ffn_dim)
 
     def forward(
         self,

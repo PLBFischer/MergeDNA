@@ -17,8 +17,5 @@ vocab_size: 6
 pad_token_id: 0
 embed_dim: 1024
 max_seq_len: 4096
-head_dim: 64
 num_heads: 16
 ffn_dim: 2752
-dropout: 0.0
-init_std: 0.02

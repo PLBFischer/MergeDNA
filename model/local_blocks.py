@@ -29,20 +29,16 @@ class LocalToMeAttentionBlock(nn.Module):
         self,
         dim: int,
         num_heads: int,
-        head_dim: int,
         ffn_dim: int,
         window_size: int = 16,
         merge_group_dim: int = 64,
-        dropout: float = 0.0,
     ):
         super().__init__()
         self.window_size = window_size
         self.norm1 = RMSNorm(dim)
-        self.attn = LocalWindowAttention(
-            dim, num_heads, head_dim, window_size, dropout=dropout,
-        )
+        self.attn = LocalWindowAttention(dim, num_heads, window_size)
         self.norm2 = RMSNorm(dim)
-        self.ffn = SwiGLUFFN(dim, ffn_dim, dropout=dropout)
+        self.ffn = SwiGLUFFN(dim, ffn_dim)
         self.merge = TokenMergeModule(dim, merge_group_dim)
 
     def forward(
@@ -71,18 +67,14 @@ class LocalAttentionBlock(nn.Module):
         self,
         dim: int,
         num_heads: int,
-        head_dim: int,
         ffn_dim: int,
         window_size: int = 16,
-        dropout: float = 0.0,
     ):
         super().__init__()
         self.norm1 = RMSNorm(dim)
-        self.attn = LocalWindowAttention(
-            dim, num_heads, head_dim, window_size, dropout=dropout,
-        )
+        self.attn = LocalWindowAttention(dim, num_heads, window_size)
         self.norm2 = RMSNorm(dim)
-        self.ffn = SwiGLUFFN(dim, ffn_dim, dropout=dropout)
+        self.ffn = SwiGLUFFN(dim, ffn_dim)
 
     def forward(
         self,

@@ -83,12 +83,11 @@ class SwiGLUFFN(nn.Module):
     Uses three linear projections: gate, up, down.
     """
 
-    def __init__(self, dim: int, hidden_dim: int, dropout: float = 0.0):
+    def __init__(self, dim: int, hidden_dim: int):
         super().__init__()
         self.w_gate = nn.Linear(dim, hidden_dim, bias=False)
         self.w_up = nn.Linear(dim, hidden_dim, bias=False)
         self.w_down = nn.Linear(hidden_dim, dim, bias=False)
-        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.dropout(self.w_down(F.silu(self.w_gate(x)) * self.w_up(x)))
+        return self.w_down(F.silu(self.w_gate(x)) * self.w_up(x))
