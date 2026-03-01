@@ -2,7 +2,7 @@
 MergeDNA Trainer.
 
 Provides a Trainer class whose .train() method runs the full
-pre-training loop (iteration-based), and a get_cosine_schedule_with_warmup
+pre-training loop (epoch-based), and a get_cosine_schedule_with_warmup
 factory that can be instantiated by Hydra for the LR scheduler.
 """
 
@@ -36,22 +36,22 @@ def get_cosine_schedule_with_warmup(
 
 
 class Trainer:
-    """Iteration-based trainer for MergeDNA pre-training.
+    """Epoch-based trainer for MergeDNA pre-training.
 
     Compatible with distributed (DDP) and single-GPU workflows.
     """
 
     def __init__(
         self,
-        total_iterations: int = 100_000,
+        total_epochs: int = 100,
         log_interval: int = 50,
-        save_interval: int = 5_000,
+        save_every_n_epochs: int = 5,
         grad_clip: float = 1.0,
         per_gpu_batch_size: int = 8,
     ):
-        self.total_iterations = total_iterations
+        self.total_epochs = total_epochs
         self.log_interval = log_interval
-        self.save_interval = save_interval
+        self.save_every_n_epochs = save_every_n_epochs
         self.grad_clip = grad_clip
         self.per_gpu_batch_size = per_gpu_batch_size
         self.logger = logging.getLogger(__name__)
@@ -76,9 +76,9 @@ class Trainer:
             latent_encoder: LatentEncoder module (possibly DDP-wrapped).
             latent_decoder: LatentDecoder module (possibly DDP-wrapped).
             local_decoder: LocalDecoder module (possibly DDP-wrapped).
-            dataloader: iterable yielding batches of token-id tensors.
+            dataloader: DataLoader yielding batches of token-id tensors.
             optimizer: configured optimizer over all model parameters.
-            scheduler: LR scheduler (stepped every iteration).
+            scheduler: LR scheduler (stepped every gradient update).
             loss_manager: LossManager instance.
             output_dir: directory for checkpoints.
             config: optional OmegaConf DictConfig (stored in checkpoints).
@@ -96,83 +96,92 @@ class Trainer:
             "local_decoder": local_decoder,
         }
 
-        start_step = self._maybe_resume(
+        start_epoch, global_step = self._maybe_resume(
             output_dir, components, optimizer, scheduler,
         )
 
         for comp in components.values():
             comp.train()
 
-        step = start_step
-        data_iter = iter(dataloader)
-        running_loss = 0.0
-        t0 = time.time()
-
         self.logger.info(
-            f"Starting training from step {step} on {device} "
-            f"(target {self.total_iterations} iterations)"
+            f"Starting training from epoch {start_epoch}, step {global_step} "
+            f"on {device} (target {self.total_epochs} epochs)"
         )
 
-        while step < self.total_iterations:
-            try:
-                batch = next(data_iter)
-            except StopIteration:
-                data_iter = iter(dataloader)
-                batch = next(data_iter)
+        for epoch in range(start_epoch, self.total_epochs):
+            running_loss = 0.0
+            t0 = time.time()
 
-            optimizer.zero_grad(set_to_none=True)
+            for batch_idx, batch in enumerate(dataloader):
+                optimizer.zero_grad(set_to_none=True)
 
-            loss, losses = loss_manager.loss(
-                local_encoder, latent_encoder, latent_decoder, local_decoder,
-                batch, device,
-            )
-            loss.backward()
-
-            all_params = []
-            for comp in components.values():
-                all_params.extend(comp.parameters())
-            torch.nn.utils.clip_grad_norm_(all_params, self.grad_clip)
-
-            optimizer.step()
-            scheduler.step()
-
-            running_loss += loss.item()
-            step += 1
-
-            if step % self.log_interval == 0:
-                elapsed = time.time() - t0
-                throughput = self.log_interval / elapsed
-                lr = optimizer.param_groups[0]["lr"]
-                avg = running_loss / self.log_interval
-                self.logger.info(
-                    f"step {step:>6d} | loss {avg:.4f} | "
-                    f"lr {lr:.2e} | {throughput:.2f} steps/s | "
-                    f"mtr {losses['loss_mtr']:.4f} "
-                    f"lat_mtr {losses['loss_latent_mtr']:.4f} "
-                    f"amtm {losses['loss_amtm']:.4f}"
+                loss, losses = loss_manager.loss(
+                    local_encoder, latent_encoder, latent_decoder, local_decoder,
+                    batch, device,
                 )
-                running_loss = 0.0
-                t0 = time.time()
+                loss.backward()
 
-            if step % self.save_interval == 0:
+                all_params = []
+                for comp in components.values():
+                    all_params.extend(comp.parameters())
+                torch.nn.utils.clip_grad_norm_(all_params, self.grad_clip)
+
+                optimizer.step()
+                scheduler.step()
+
+                running_loss += loss.item()
+                global_step += 1
+
+                if global_step % self.log_interval == 0:
+                    elapsed = time.time() - t0
+                    steps_since_log = self.log_interval
+                    throughput = steps_since_log / elapsed
+                    lr = optimizer.param_groups[0]["lr"]
+                    avg = running_loss / steps_since_log
+                    self.logger.info(
+                        f"epoch {epoch + 1}/{self.total_epochs} "
+                        f"step {global_step:>6d} | loss {avg:.4f} | "
+                        f"lr {lr:.2e} | {throughput:.2f} steps/s | "
+                        f"mtr {losses['loss_mtr']:.4f} "
+                        f"lat_mtr {losses['loss_latent_mtr']:.4f} "
+                        f"amtm {losses['loss_amtm']:.4f}"
+                    )
+                    running_loss = 0.0
+                    t0 = time.time()
+
+            self.logger.info(
+                f"Epoch {epoch + 1}/{self.total_epochs} complete "
+                f"(global step {global_step})"
+            )
+
+            if (epoch + 1) % self.save_every_n_epochs == 0:
                 self._save_checkpoint(
-                    output_dir, step, components, optimizer, scheduler,
+                    output_dir, epoch + 1, global_step, components,
+                    optimizer, scheduler,
                 )
 
         self._save_checkpoint(
-            output_dir, step, components, optimizer, scheduler, is_final=True,
+            output_dir, self.total_epochs, global_step, components,
+            optimizer, scheduler, is_final=True,
         )
-        self.logger.info(f"Training complete at step {step}.")
+        self.logger.info(
+            f"Training complete: {self.total_epochs} epochs, "
+            f"{global_step} total steps."
+        )
 
-        stats = {"final_step": step}
+        stats = {"final_epoch": self.total_epochs, "final_step": global_step}
         return output_dir, stats
 
-    def _save_checkpoint(self, output_dir, step, components, optimizer, scheduler, is_final=False):
-        tag = "final" if is_final else str(step)
+    def _save_checkpoint(
+        self, output_dir, epoch, global_step, components,
+        optimizer, scheduler, is_final=False,
+    ):
+        tag = "final" if is_final else f"epoch_{epoch}"
         path = os.path.join(output_dir, f"checkpoint_{tag}.pt")
 
         state = {
-            "step": step,
+            "epoch": epoch,
+            "global_step": global_step,
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
         }
@@ -184,27 +193,29 @@ class Trainer:
         self.logger.info(f"Saved checkpoint to {path}")
 
     def _maybe_resume(self, output_dir, components, optimizer, scheduler):
-        """Look for the latest checkpoint in output_dir and resume."""
-        if not os.path.isdir(output_dir):
-            return 0
+        """Look for the latest checkpoint in output_dir and resume.
 
-        best_step = 0
+        Returns:
+            (start_epoch, global_step) tuple.
+        """
+        if not os.path.isdir(output_dir):
+            return 0, 0
+
+        best_epoch = 0
         best_path = None
         for fname in os.listdir(output_dir):
-            if fname.startswith("checkpoint_") and fname.endswith(".pt"):
-                tag = fname.replace("checkpoint_", "").replace(".pt", "")
-                if tag == "final":
-                    continue
+            if fname.startswith("checkpoint_epoch_") and fname.endswith(".pt"):
+                tag = fname.replace("checkpoint_epoch_", "").replace(".pt", "")
                 try:
-                    s = int(tag)
-                    if s > best_step:
-                        best_step = s
+                    e = int(tag)
+                    if e > best_epoch:
+                        best_epoch = e
                         best_path = os.path.join(output_dir, fname)
                 except ValueError:
                     continue
 
         if best_path is None:
-            return 0
+            return 0, 0
 
         self.logger.info(f"Resuming from {best_path}")
         ckpt = torch.load(best_path, map_location="cpu", weights_only=False)
@@ -219,4 +230,4 @@ class Trainer:
         if "scheduler" in ckpt:
             scheduler.load_state_dict(ckpt["scheduler"])
 
-        return ckpt.get("step", 0)
+        return ckpt.get("epoch", 0), ckpt.get("global_step", 0)

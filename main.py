@@ -108,7 +108,11 @@ def main(cfg: DictConfig):
         )
 
         if is_main:
-            logger.info(f"Training complete. Final step: {stats['final_step']}")
+            logger.info(
+                f"Training complete. "
+                f"Epochs: {stats['final_epoch']}, "
+                f"Total steps: {stats['final_step']}"
+            )
 
     finally:
         if distributed:
