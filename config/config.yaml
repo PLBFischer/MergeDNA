@@ -1,5 +1,4 @@
 defaults:
-  - experiment: default
   - dataset: default
   - local_encoder: default
   - latent_encoder: default
@@ -9,13 +8,10 @@ defaults:
   - training: default
   - optimizer: default
   - scheduler: default
+  - experiment: default
 
 seed: 42
 
 # Shared architecture constants (referenced by component configs via ${...})
 vocab_size: 6
 pad_token_id: 0
-embed_dim: 1024
-max_seq_len: 4096
-num_heads: 16
-ffn_dim: 2752

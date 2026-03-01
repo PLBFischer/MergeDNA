@@ -1,4 +1,3 @@
-_target_: dataset.default.StreamingFASTADataset
-fasta_dir: ???
-max_seq_len: ${max_seq_len}
-file_glob: "*.fa*"
+_target_: dataset.default.DNADataset
+txt_path: ???
+max_seq_len: ${experiment.max_seq_len}
