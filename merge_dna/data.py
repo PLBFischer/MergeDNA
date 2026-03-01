@@ -5,7 +5,8 @@ Reads multi-FASTA files (the Multi-Species Genomes corpus referenced in the
 paper) and yields fixed-length chunks of nucleotide-encoded sequences.
 
 DESIGN DECISIONS:
-  - Characters outside {A, T, C, G, N} are mapped to N (ambiguous).
+  - Only {A, T, C, G, N} (case-insensitive) are valid characters; any other
+    character raises a ValueError.
   - Sequences shorter than max_seq_len are right-padded with PAD.
   - Sequences are randomly cropped to max_seq_len during training.
 """
@@ -31,10 +32,18 @@ PAD_ID = 0
 def encode_sequence(seq: str, max_len: int) -> torch.Tensor:
     """Encode a nucleotide string into integer token ids.
 
-    Unknown characters are mapped to N (5).  Output is right-padded to
-    *max_len* with PAD (0).
+    Only {A, T, C, G, N} (case-insensitive) are accepted.  Any other character
+    raises a ValueError.  Output is right-padded to *max_len* with PAD (0).
     """
-    ids = [NUCLEOTIDE_MAP.get(c, 5) for c in seq[:max_len]]
+    ids = []
+    for c in seq[:max_len]:
+        token_id = NUCLEOTIDE_MAP.get(c)
+        if token_id is None:
+            raise ValueError(
+                f"Invalid nucleotide character {c!r} in sequence. "
+                f"Only {{A, T, C, G, N}} (case-insensitive) are allowed."
+            )
+        ids.append(token_id)
     if len(ids) < max_len:
         ids.extend([PAD_ID] * (max_len - len(ids)))
     return torch.tensor(ids, dtype=torch.long)

@@ -62,9 +62,8 @@ class MergeDNA(nn.Module):
         self.output_head = nn.Linear(D, config.vocab_size, bias=False)
         self.final_norm = RMSNorm(D)
 
-        # --- RoPE frequencies (cached buffer) ---
-        rope_freqs = precompute_rope_freqs(config.head_dim, config.max_seq_len)
-        self.register_buffer("rope_freqs", rope_freqs, persistent=False)
+        # --- RoPE frequencies ---
+        self.rope_freqs = precompute_rope_freqs(config.head_dim, config.max_seq_len)
 
         # --- 1. Local Encoder (learnable tokenizer) ---
         self.local_encoder = nn.ModuleList([
@@ -123,22 +122,6 @@ class MergeDNA(nn.Module):
             for _ in range(config.local_decoder_layers)
         ])
         self.local_decoder_norm = RMSNorm(D)
-
-        self._init_weights()
-
-    def _init_weights(self):
-        """DESIGN DECISION: Standard Transformer init (normal, std=0.02).
-        Paper does not specify initialization."""
-        std = self.config.init_std
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.normal_(module.weight, mean=0.0, std=std)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.Embedding):
-                nn.init.normal_(module.weight, mean=0.0, std=std)
-                if module.padding_idx is not None:
-                    module.weight.data[module.padding_idx].zero_()
 
     # ------------------------------------------------------------------
     # Sub-component forward methods

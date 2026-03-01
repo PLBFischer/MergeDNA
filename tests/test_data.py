@@ -28,12 +28,14 @@ class TestEncodeSequence:
         assert len(t) == 4
         assert t.tolist() == [1, 2, 3, 4]
 
-    def test_unknown_maps_to_n(self):
-        t = encode_sequence("AXYZ", max_len=4)
-        assert t[0].item() == 1  # A
-        assert t[1].item() == 5  # X -> N
-        assert t[2].item() == 5  # Y -> N
-        assert t[3].item() == 5  # Z -> N
+    def test_invalid_character_raises(self):
+        with pytest.raises(ValueError, match="Invalid nucleotide character"):
+            encode_sequence("AXYZ", max_len=4)
+
+    def test_each_invalid_character_raises(self):
+        for bad_char in ("X", "Y", "Z", "R", "W", "B", "D", "H", "V", ".", "-"):
+            with pytest.raises(ValueError):
+                encode_sequence(bad_char, max_len=1)
 
     def test_case_insensitive(self):
         t1 = encode_sequence("atcg", max_len=4)

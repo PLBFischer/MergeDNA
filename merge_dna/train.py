@@ -139,40 +139,36 @@ def main():
 
     # --- Training loop ---
     model.train()
-    accum = config.gradient_accumulation_steps
-    global_step = start_step
-    optimizer.zero_grad()
+    step = start_step
     data_iter = iter(dataloader)
     running_loss = 0.0
     t0 = time.time()
 
-    while global_step < config.total_iterations:
-        for micro_step in range(accum):
-            try:
-                batch = next(data_iter)
-            except StopIteration:
-                data_iter = iter(dataloader)
-                batch = next(data_iter)
+    while step < config.total_iterations:
+        try:
+            batch = next(data_iter)
+        except StopIteration:
+            data_iter = iter(dataloader)
+            batch = next(data_iter)
 
-            input_ids = batch.cuda(local_rank, non_blocking=True)
-            output = model(input_ids, mode="pretrain")
-            loss_dict = compute_pretrain_loss(output, input_ids, config)
-            loss = loss_dict["loss"] / accum
-            loss.backward()
-            running_loss += loss_dict["loss"].item() / accum
+        input_ids = batch.cuda(local_rank, non_blocking=True)
+        output = model(input_ids, mode="pretrain")
+        loss_dict = compute_pretrain_loss(output, input_ids, config)
+        loss_dict["loss"].backward()
+        running_loss += loss_dict["loss"].item()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
         optimizer.step()
         scheduler.step()
         optimizer.zero_grad()
-        global_step += 1
+        step += 1
 
-        if is_main and global_step % args.log_interval == 0:
+        if is_main and step % args.log_interval == 0:
             elapsed = time.time() - t0
             throughput = args.log_interval / elapsed
             lr = optimizer.param_groups[0]["lr"]
             print(
-                f"step {global_step:>6d} | "
+                f"step {step:>6d} | "
                 f"loss {running_loss / args.log_interval:.4f} | "
                 f"lr {lr:.2e} | "
                 f"{throughput:.2f} steps/s"
@@ -180,13 +176,13 @@ def main():
             running_loss = 0.0
             t0 = time.time()
 
-        if is_main and global_step % args.save_interval == 0:
+        if is_main and step % args.save_interval == 0:
             ckpt_path = os.path.join(
-                args.output_dir, f"checkpoint_{global_step}.pt"
+                args.output_dir, f"checkpoint_{step}.pt"
             )
             torch.save(
                 {
-                    "step": global_step,
+                    "step": step,
                     "model": model.module.state_dict(),
                     "optimizer": optimizer.state_dict(),
                     "scheduler": scheduler.state_dict(),
@@ -200,7 +196,7 @@ def main():
         final_path = os.path.join(args.output_dir, "checkpoint_final.pt")
         torch.save(
             {
-                "step": global_step,
+                "step": step,
                 "model": model.module.state_dict(),
                 "config": config,
             },
