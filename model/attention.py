@@ -1,8 +1,8 @@
 """
 Attention implementations for MergeDNA.
 
-* ``FullAttention``  -- standard multi-head self-attention using Flash
-  Attention (flash_attn library).
+* ``FullAttention``  -- standard multi-head self-attention using
+  ``F.scaled_dot_product_attention``.
 * ``LocalWindowAttention`` -- non-overlapping window attention where each
   window is processed independently.  Window size is fixed at 16 as
   stated in the paper.
@@ -16,16 +16,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from flash_attn import flash_attn_func
-
 from model.layers import apply_rope
 
 
 class FullAttention(nn.Module):
-    """Multi-head self-attention over the full sequence using flash_attn_func.
-
-    flash_attn_func expects tensors in (B, S, H, D) layout.
-    """
+    """Multi-head self-attention over the full sequence."""
 
     def __init__(
         self,
@@ -66,8 +61,12 @@ class FullAttention(nn.Module):
             q = q_r.permute(0, 2, 1, 3)
             k = k_r.permute(0, 2, 1, 3)
 
-        attn_out = flash_attn_func(q, k, v, causal=False)
-        out = attn_out.reshape(B, S, self.num_heads * self.head_dim)
+        # F.scaled_dot_product_attention expects (B, H, S, D)
+        q = q.permute(0, 2, 1, 3)
+        k = k.permute(0, 2, 1, 3)
+        v = v.permute(0, 2, 1, 3)
+        attn_out = F.scaled_dot_product_attention(q, k, v)
+        out = attn_out.permute(0, 2, 1, 3).reshape(B, S, self.num_heads * self.head_dim)
         return self.wo(out)
 
 
@@ -75,9 +74,9 @@ class LocalWindowAttention(nn.Module):
     """Non-overlapping window attention.
 
     The sequence is partitioned into windows of ``window_size`` tokens.
-    Attention is computed independently within each window via Flash Attention.
+    Attention is computed independently within each window.
     If the sequence length is not divisible by window_size, the last window
-    is simply shorter (padded internally, then unpadded).
+    is padded internally then unpadded.
     """
 
     def __init__(
@@ -143,9 +142,12 @@ class LocalWindowAttention(nn.Module):
             q = q_r.permute(0, 2, 1, 3)
             k = k_r.permute(0, 2, 1, 3)
 
-        attn_out = flash_attn_func(q, k, v, causal=False)  # (B*n_win, W, H, hd)
-
-        attn_out = attn_out.reshape(B, S_padded, self.num_heads * self.head_dim)
+        # F.scaled_dot_product_attention expects (B, H, S, D)
+        q = q.permute(0, 2, 1, 3)
+        k = k.permute(0, 2, 1, 3)
+        v = v.permute(0, 2, 1, 3)
+        attn_out = F.scaled_dot_product_attention(q, k, v)  # (B*n_win, H, W, hd)
+        attn_out = attn_out.permute(0, 2, 1, 3).reshape(B, S_padded, self.num_heads * self.head_dim)
         out = self.wo(attn_out)
 
         if pad > 0:

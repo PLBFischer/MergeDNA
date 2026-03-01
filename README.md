@@ -190,7 +190,7 @@ merge_dna/
   __init__.py        -- Package exports
   config.py          -- MergeDNAConfig dataclass
   layers.py          -- RMSNorm, SwiGLU FFN, RoPE
-  attention.py       -- FullAttention, LocalWindowAttention (Flash Attention)
+  attention.py       -- FullAttention, LocalWindowAttention
   token_merge.py     -- TokenMergeModule, GlobalTokenMergeModule, token_unmerge
   blocks.py          -- TransformerBlock, LocalToMeAttentionBlock, LocalAttentionBlock
   model.py           -- MergeDNA model (all 4 components)
