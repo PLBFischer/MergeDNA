@@ -9,6 +9,7 @@ defaults:
   - optimizer: default
   - scheduler: default
   - experiment: default
+  - wandb: default
 
 seed: 42
 

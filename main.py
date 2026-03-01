@@ -14,6 +14,7 @@ import os
 import hydra
 import torch
 import torch.distributed as dist
+import wandb
 from omegaconf import DictConfig, OmegaConf
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
@@ -49,6 +50,17 @@ def main(cfg: DictConfig):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     is_main = rank == 0
+
+    use_wandb = False
+    if is_main and os.environ.get("WANDB_API_KEY"):
+        wcfg = cfg.get("wandb", {})
+        wandb.init(
+            project=wcfg.get("project", "mergedna") or "mergedna",
+            name=wcfg.get("name", None) or None,
+            entity=wcfg.get("entity", None) or None,
+            config=OmegaConf.to_container(cfg, resolve=True),
+        )
+        use_wandb = True
 
     try:
         # ---- Dataset and DataLoader ----
@@ -105,6 +117,7 @@ def main(cfg: DictConfig):
             loss_manager=loss_manager,
             output_dir=output_dir,
             config=cfg,
+            use_wandb=use_wandb,
         )
 
         if is_main:
@@ -115,6 +128,8 @@ def main(cfg: DictConfig):
             )
 
     finally:
+        if use_wandb:
+            wandb.finish()
         if distributed:
             cleanup_distributed()
 

@@ -14,6 +14,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import wandb
 
 
 def get_cosine_schedule_with_warmup(
@@ -67,6 +68,7 @@ class Trainer:
         loss_manager,
         output_dir: str = "./outputs",
         config=None,
+        use_wandb: bool = False,
     ):
         """Run the full pre-training loop.
 
@@ -145,6 +147,19 @@ class Trainer:
                         f"lat_mtr {losses['loss_latent_mtr']:.4f} "
                         f"amtm {losses['loss_amtm']:.4f}"
                     )
+                    if use_wandb:
+                        wandb.log(
+                            {
+                                "train/loss": avg,
+                                "train/loss_mtr": losses["loss_mtr"],
+                                "train/loss_latent_mtr": losses["loss_latent_mtr"],
+                                "train/loss_amtm": losses["loss_amtm"],
+                                "train/lr": lr,
+                                "train/throughput_steps_per_sec": throughput,
+                                "train/epoch": epoch + 1,
+                            },
+                            step=global_step,
+                        )
                     running_loss = 0.0
                     t0 = time.time()
 
