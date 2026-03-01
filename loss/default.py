@@ -65,7 +65,7 @@ class LossManager:
             z_prime_2, source.detach(), K,
         )
         z_hat_l_2 = token_unmerge(z_k, source_prime)
-        z_hat_l_2 = latent_decoder(z_hat_l_2, pos_ids)
+        z_hat_l_2 = latent_decoder(z_hat_l_2, None)
         logits_latent_mtr = local_decoder(z_hat_l_2, source)
         l_latent_mtr = self._unwrap(local_decoder).loss(
             logits_latent_mtr, input_ids, pad_id=self.pad_token_id,
