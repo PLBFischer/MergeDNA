@@ -1,0 +1,5 @@
+_target_: training.get_cosine_schedule_with_warmup
+_partial_: true
+warmup_steps: 1000
+total_steps: 12500
+min_lr_ratio: 0.1

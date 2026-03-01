@@ -1,4 +1,4 @@
 _target_: dataset.default.DNADataset
 fasta_path: "hg38_mini.fa"
 max_seq_len: ${experiment.max_seq_len}
-dataset_len: 8000
+dataset_len: 1000
