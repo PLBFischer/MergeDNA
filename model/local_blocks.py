@@ -1,8 +1,5 @@
-"""
-Transformer blocks for MergeDNA.
+"""Local attention blocks for MergeDNA.
 
-* ``TransformerBlock`` -- standard pre-norm Transformer block with full
-  attention (used in Latent Encoder / Decoder).
 * ``LocalToMeAttentionBlock`` -- local-window attention followed by
   differentiable token merging (used in Local Encoder).
 * ``LocalAttentionBlock`` -- local-window attention without merging
@@ -14,37 +11,9 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from .attention import FullAttention, LocalWindowAttention
-from .layers import RMSNorm, SwiGLUFFN
-from .token_merge import TokenMergeModule
-
-
-class TransformerBlock(nn.Module):
-    """Pre-norm Transformer block with full self-attention (LLaMA-style)."""
-
-    def __init__(
-        self,
-        dim: int,
-        num_heads: int,
-        head_dim: int,
-        ffn_dim: int,
-        dropout: float = 0.0,
-    ):
-        super().__init__()
-        self.norm1 = RMSNorm(dim)
-        self.attn = FullAttention(dim, num_heads, head_dim, dropout=dropout)
-        self.norm2 = RMSNorm(dim)
-        self.ffn = SwiGLUFFN(dim, ffn_dim, dropout=dropout)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        rope_freqs: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x), rope_freqs, position_ids)
-        x = x + self.ffn(self.norm2(x))
-        return x
+from model.attention import LocalWindowAttention
+from model.layers import RMSNorm, SwiGLUFFN
+from model.token_merge import TokenMergeModule
 
 
 class LocalToMeAttentionBlock(nn.Module):
@@ -84,19 +53,6 @@ class LocalToMeAttentionBlock(nn.Module):
         r: int,
         rope_freqs: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Args:
-            x: (B, S, D)
-            source: (B, S, N_orig)
-            position_ids: (B, S)
-            r: merges per window for this layer
-            rope_freqs: precomputed RoPE frequencies
-
-        Returns:
-            x_merged: (B, S', D)  where S' = S - n_merged
-            source_merged: (B, S', N_orig)
-            position_ids_merged: (B, S')
-        """
         x = x + self.attn(self.norm1(x), rope_freqs, position_ids)
         x = x + self.ffn(self.norm2(x))
         x, source, position_ids = self.merge(

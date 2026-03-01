@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 from flash_attn import flash_attn_func
 
-from .layers import apply_rope
+from model.layers import apply_rope
 
 
 class _QKVProj(nn.Module):

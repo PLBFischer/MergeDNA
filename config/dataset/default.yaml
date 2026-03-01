@@ -1,0 +1,4 @@
+_target_: dataset.default.StreamingFASTADataset
+fasta_dir: ???
+max_seq_len: ${max_seq_len}
+file_glob: "*.fa*"

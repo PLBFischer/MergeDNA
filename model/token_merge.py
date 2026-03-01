@@ -133,17 +133,12 @@ class TokenMergeModule(nn.Module):
 
         r = min(r, W - 1)
 
-        # Compute grouping embeddings and adjacent similarity
         g = self.group_proj(x)  # (B, W, group_dim)
         g_norm = F.normalize(g, dim=-1)
-        # Cosine similarity between adjacent tokens
         sim = (g_norm[:, :-1] * g_norm[:, 1:]).sum(dim=-1)  # (B, W-1)
 
-        # Norms for weighted averaging
         g_norms = g.norm(dim=-1)  # (B, W)
 
-        # Greedily select top-r non-overlapping adjacent pairs.
-        # We process per-batch because selected pairs interact.
         results_x = []
         results_s = []
         results_p = []
@@ -185,7 +180,6 @@ class TokenMergeModule(nn.Module):
         W = x.shape[0]
         merged_mask = torch.zeros(W, dtype=torch.bool, device=x.device)
 
-        # Sort adjacency edges by similarity (descending)
         _, order = sim.sort(descending=True)
 
         pairs = []
@@ -199,9 +193,6 @@ class TokenMergeModule(nn.Module):
                 if len(pairs) == r:
                     break
 
-        # Build output: iterate through tokens, replacing merged pairs with
-        # their weighted average.  The "keeper" is the left (smaller-index)
-        # token whose position is preserved.
         pair_set = {i: j for i, j in pairs}
 
         out_x = []
@@ -214,7 +205,6 @@ class TokenMergeModule(nn.Module):
             if k in pair_set:
                 j = pair_set[k]
                 skip.add(j)
-                # Weighted average by grouping-embedding norms (soft merge)
                 w_i = norms[k]
                 w_j = norms[j]
                 total = w_i + w_j + 1e-8
@@ -222,7 +212,6 @@ class TokenMergeModule(nn.Module):
                 merged_src = source[k] + source[j]
                 out_x.append(merged_tok)
                 out_s.append(merged_src)
-                # DESIGN DECISION: keeper position = left token position
                 out_p.append(pos[k])
             else:
                 out_x.append(x[k])
