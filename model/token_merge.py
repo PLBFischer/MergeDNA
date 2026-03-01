@@ -7,10 +7,9 @@ import torch.nn.functional as F
 
 class TokenMergeModule(nn.Module):
 
-    def __init__(self, dim: int, group_dim: int = 64, global_merge: bool = False):
+    def __init__(self, dim: int, group_dim: int = 64):
         super().__init__()
         self.group_proj = nn.Linear(dim, group_dim, bias=False)
-        self.global_merge = global_merge
 
     def forward(
         self,
@@ -18,9 +17,8 @@ class TokenMergeModule(nn.Module):
         source: torch.Tensor,
         position_ids: torch.Tensor,
         r: int,
-        window_size: int = 0,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Merge *r* token pairs.
+        """Merge *r* adjacent token pairs.
 
         Args:
             x: (B, S, D) token embeddings.
@@ -36,39 +34,21 @@ class TokenMergeModule(nn.Module):
         """
         B, S, D = x.shape
 
-        # --- Candidate pairs ------------------------------------------------
-        if self.global_merge:
-            pairs_i, pairs_j = torch.triu_indices(S, S, offset=1, device=x.device)
-        else:
-            idx = torch.arange(S, device=x.device)
-            pi_parts, pj_parts = [], []
-            for d in range(1, min(window_size, S)):
-                pi_parts.append(idx[: S - d])
-                pj_parts.append(idx[d:])
-            if not pi_parts:
-                return x, source, position_ids
-            pairs_i = torch.cat(pi_parts)
-            pairs_j = torch.cat(pj_parts)
+        if S < 2:
+            return x, source, position_ids
 
-        # --- Grouping projection + cosine similarity for all candidates -----
-        g = self.group_proj(x)                                   # (B, S, gd)
+        # --- Cosine similarity between every adjacent pair -------------------
+        g = self.group_proj(x)           # (B, S, gd)
         g_norm = F.normalize(g, dim=-1)
-        g_norms = g.norm(dim=-1)                                 # (B, S)
-        sim = (g_norm[:, pairs_i] * g_norm[:, pairs_j]).sum(-1)  # (B, P)
-
-        # --- Pre-compute tie-breaking order (shared across all batch elems) -
-        # Encodes (i, j) as a single integer so one argsort gives (i ASC, j ASC).
-        pairs_i_list = pairs_i.tolist()
-        pairs_j_list = pairs_j.tolist()
-        sec_order = torch.argsort(pairs_i * S + pairs_j, stable=True)
+        g_norms = g.norm(dim=-1)         # (B, S)
+        sim = (g_norm[:, :-1] * g_norm[:, 1:]).sum(-1)  # (B, S-1)
 
         # --- Per-batch greedy selection + simultaneous merge ----------------
         results_x, results_s, results_p = [], [], []
         for b in range(B):
             xb, sb, pb = self._select_and_merge(
                 x[b], source[b], position_ids[b],
-                sim[b], pairs_i_list, pairs_j_list,
-                g_norms[b], r, sec_order,
+                sim[b], g_norms[b], r,
             )
             results_x.append(xb)
             results_s.append(sb)
@@ -86,23 +66,14 @@ class TokenMergeModule(nn.Module):
         source: torch.Tensor,
         pos: torch.Tensor,
         sim: torch.Tensor,
-        pairs_i: list,
-        pairs_j: list,
         norms: torch.Tensor,
         r: int,
-        sec_order: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Greedy disjoint pair selection + simultaneous merge (single batch).
-
-        Candidates are sorted by (score DESC, i ASC, j ASC) so that
-        tie-breaking is fully deterministic.  ``sec_order`` encodes the
-        (i ASC, j ASC) tie-breaking permutation and is pre-computed once
-        outside the batch loop.
-        """
+        """Greedy disjoint adjacent-pair selection + simultaneous merge."""
         S = x.shape[0]
 
-        # Stable sort by sim DESC on top of the pre-computed (i, j) order.
-        order_list = sec_order[torch.argsort(-sim[sec_order], stable=True)].tolist()
+        # Sort pairs by similarity descending; stable for determinism on ties.
+        order_list = torch.argsort(-sim, stable=True).tolist()
 
         # Greedy disjoint matching — each token appears in at most one pair.
         # This selection is inherently sequential and cannot be vectorized.
@@ -110,7 +81,7 @@ class TokenMergeModule(nn.Module):
         sel_i: list = []
         sel_j: list = []
         for p in order_list:
-            i, j = pairs_i[p], pairs_j[p]
+            i, j = p, p + 1
             if i not in used and j not in used:
                 sel_i.append(i)
                 sel_j.append(j)

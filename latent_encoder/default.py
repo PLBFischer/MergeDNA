@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 
 from model.layers import RMSNorm, precompute_rope_freqs
-from model.token_merge import GlobalTokenMergeModule
+from model.token_merge import TokenMergeModule
 from model.transformer_block import TransformerBlock
 
 
@@ -42,7 +42,7 @@ class LatentEncoder(nn.Module):
             for _ in range(num_layers)
         ])
         self.norm = RMSNorm(embed_dim)
-        self.global_merge = GlobalTokenMergeModule(embed_dim, merge_group_dim)
+        self.global_merge = TokenMergeModule(embed_dim, merge_group_dim)
 
     def forward(
         self,

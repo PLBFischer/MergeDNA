@@ -51,9 +51,7 @@ class LocalToMeAttentionBlock(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x = x + self.attn(self.norm1(x), rope_freqs, position_ids)
         x = x + self.ffn(self.norm2(x))
-        x, source, position_ids = self.merge(
-            x, source, position_ids, r, self.window_size,
-        )
+        x, source, position_ids = self.merge(x, source, position_ids, r)
         return x, source, position_ids
 
 
