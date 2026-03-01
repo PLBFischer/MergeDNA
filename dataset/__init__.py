@@ -1,3 +1,3 @@
-from dataset.default import FASTADataset, StreamingFASTADataset
+from dataset.default import DNADataset
 
-__all__ = ["FASTADataset", "StreamingFASTADataset"]
+__all__ = ["DNADataset"]
