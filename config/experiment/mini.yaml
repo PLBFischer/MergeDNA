@@ -1,0 +1,13 @@
+name: default
+
+embed_dim: 1024
+max_seq_len: 4096
+num_heads: 16
+ffn_dim: 2752
+
+local_window_size: 16
+
+local_encoder_num_layers: 4
+local_decoder_num_layers: 2
+latent_encoder_num_layers: 20
+latent_decoder_num_layers: 4

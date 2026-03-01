@@ -2,17 +2,31 @@ import random
 from typing import List
 
 import torch
+from hydra.utils import to_absolute_path
 from torch.utils.data import Dataset
 
 from utils.dna import encode_sequence
 
 
 class DNADataset(Dataset):
-    def __init__(self, txt_path: str, max_seq_len: int = 4096, dataset_len: int = 1000):
+    def __init__(self, fasta_path: str, max_seq_len: int = 4096, dataset_len: int = 1000):
         self.max_seq_len = max_seq_len
         self.dataset_len = dataset_len
-        with open(txt_path, "r") as f:
-            self.sequences: List[str] = [line.strip() for line in f if line.strip()]
+        self.sequences: List[str] = []
+        with open(to_absolute_path(fasta_path), "r") as f:
+            current_seq: List[str] = []
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith(">"):
+                    if current_seq:
+                        self.sequences.append("".join(current_seq))
+                        current_seq = []
+                else:
+                    current_seq.append(line)
+            if current_seq:
+                self.sequences.append("".join(current_seq))
 
     def __len__(self) -> int:
         return self.dataset_len

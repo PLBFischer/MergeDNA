@@ -2,10 +2,10 @@
 MergeDNA pre-training entry point (Hydra).
 
 Usage (single-GPU):
-    python main.py dataset.txt_path=/path/to/sequences.txt
+    python main.py dataset.fasta_path=/path/to/sequences.fa
 
 Usage (multi-GPU, 8 GPUs):
-    torchrun --nproc_per_node=8 main.py dataset.txt_path=/path/to/sequences.txt
+    torchrun --nproc_per_node=8 main.py dataset.fasta_path=/path/to/sequences.fa
 """
 
 import logging
