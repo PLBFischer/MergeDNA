@@ -1,0 +1,16 @@
+name: mini
+
+defaults:
+  - /dataset: mini
+
+embed_dim: 256
+max_seq_len: 4096
+num_heads: 8
+ffn_dim: 768
+
+local_window_size: 16
+
+local_encoder_num_layers: 3
+local_decoder_num_layers: 2
+latent_encoder_num_layers: 5
+latent_decoder_num_layers: 2
