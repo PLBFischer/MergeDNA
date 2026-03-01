@@ -1,0 +1,6 @@
+_target_: dataset.synthetic.SyntheticDNADataset
+num_sequences: 1000
+max_seq_len: ${max_seq_len}
+min_k: 2
+max_k: 8
+seed: 42
