@@ -13,6 +13,8 @@ breakdown dictionary for logging.
 
 import torch
 
+from model.token_merge import token_unmerge
+
 
 class LossManager:
     def __init__(
@@ -56,14 +58,30 @@ class LossManager:
         )
 
         # ---- Pass 2: Latent MTR (phi frozen, Eq. 6 with detached z_l) ----
+        # Step 1: local encoder output (frozen via detach).
         z_l_detached = z_l.detach()
-        z_prime_2 = latent_encoder(z_l_detached, pos_ids)
+        source_detached = source.detach()
+        pos_ids_detached = pos_ids.detach()
+
+        # Step 2: latent encoder forward pass, then merge L → K.
+        z_prime_2 = latent_encoder(z_l_detached, pos_ids_detached)
         K = max(1, int(z_l_detached.shape[1] * self.target_latent_compression))
-        z_k, source_prime = self._unwrap(latent_encoder).merge(
-            z_prime_2, source.detach(), K,
+        z_k, source_prime, _ = self._unwrap(latent_encoder).merge(
+            z_prime_2, source_detached, pos_ids_detached, K,
         )
-        z_hat_k = latent_decoder(z_k, None)
-        logits_latent_mtr = local_decoder(z_hat_k, source_prime)
+
+        # Step 3: unmerge K → L.
+        # source_prime (B, K, N) @ source_detached^T (B, N, L) = (B, K, L),
+        # binarised so each L-token maps to exactly one K-token.
+        overlap = torch.bmm(source_prime.float(), source_detached.float().transpose(1, 2))
+        source_kl = (overlap > 0.5).float()   # (B, K, L)
+        z_l_2 = token_unmerge(z_k, source_kl)  # (B, L, D)
+
+        # Step 4: latent decoder forward on L tokens.
+        z_hat_l_2 = latent_decoder(z_l_2, pos_ids_detached)
+
+        # Step 5: local decoder unmerges L → N and produces logits.
+        logits_latent_mtr = local_decoder(z_hat_l_2, source_detached)
         l_latent_mtr = self._unwrap(local_decoder).loss(
             logits_latent_mtr, input_ids, pad_id=self.pad_token_id,
         )

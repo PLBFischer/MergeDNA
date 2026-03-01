@@ -66,17 +66,22 @@ class LatentEncoder(nn.Module):
         self,
         z_prime: torch.Tensor,
         source: torch.Tensor,
+        pos_ids: torch.Tensor,
         K: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Global token selection (pre-training pass 2).
 
         Args:
             z_prime: (B, L, D) latent embeddings.
             source: (B, L, N_orig) source matrix.
+            pos_ids: (B, L) position ids.
             K: target number of salient tokens.
 
         Returns:
             z_k: (B, K, D) selected latent tokens.
             source_prime: (B, K, N_orig) updated source matrix (S').
+            pos_ids_k: (B, K) position ids of kept tokens.
         """
-        return self.global_merge(z_prime, source, K)
+        L = z_prime.shape[1]
+        r = max(0, L - K)
+        return self.global_merge(z_prime, source, pos_ids, r)
