@@ -4,7 +4,7 @@ defaults:
   - /dataset: mini
 
 embed_dim: 256
-max_seq_len: 4096
+max_seq_len: 512
 num_heads: 8
 ffn_dim: 768
 
