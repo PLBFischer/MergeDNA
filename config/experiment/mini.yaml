@@ -1,8 +1,8 @@
 name: mini
 
 defaults:
-  - /dataset: mini
-  - override /scheduler: mini
+  - override /dataset@dataset: mini
+  - override /scheduler@scheduler: mini
 
 embed_dim: 256
 max_seq_len: 512
