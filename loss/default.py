@@ -61,13 +61,12 @@ class LossManager:
         # Step 1: local encoder output (frozen via detach).
         z_l_detached = z_l.detach()
         source_detached = source.detach()
-        pos_ids_detached = pos_ids.detach()
 
         # Step 2: latent encoder forward pass, then merge L → K.
-        z_prime_2 = latent_encoder(z_l_detached, pos_ids_detached)
+        z_prime_2 = latent_encoder(z_l_detached, pos_ids)
         K = max(1, int(z_l_detached.shape[1] * self.target_latent_compression))
         z_k, source_prime, _ = self._unwrap(latent_encoder).merge(
-            z_prime_2, source_detached, pos_ids_detached, K,
+            z_prime_2, source_detached, pos_ids, K,
         )
 
         # Step 3: unmerge K → L.
@@ -78,7 +77,7 @@ class LossManager:
         z_l_2 = token_unmerge(z_k, source_kl)  # (B, L, D)
 
         # Step 4: latent decoder forward on L tokens.
-        z_hat_l_2 = latent_decoder(z_l_2, pos_ids_detached)
+        z_hat_l_2 = latent_decoder(z_l_2, pos_ids)
 
         # Step 5: local decoder unmerges L → N and produces logits.
         logits_latent_mtr = local_decoder(z_hat_l_2, source_detached)
