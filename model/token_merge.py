@@ -16,8 +16,9 @@ class TokenMergeModule(nn.Module):
         x: torch.Tensor,
         source: torch.Tensor,
         position_ids: torch.Tensor,
+        span_ids: torch.Tensor,
         r: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Merge *r* adjacent token pairs.
 
         Args:
@@ -25,17 +26,19 @@ class TokenMergeModule(nn.Module):
             source: (B, S, N_orig) source matrix mapping current tokens to
                     original input positions.
             position_ids: (B, S) absolute position indices for each token.
+            span_ids: (B, S) number of base tokens in each merged token.
             r: number of pairs to merge.
 
         Returns:
             x_merged: (B, S', D)
             source_merged: (B, S', N_orig)
             position_ids_merged: (B, S')
+            span_ids_merged: (B, S')
         """
         B, S, D = x.shape
 
         if S < 2:
-            return x, source, position_ids
+            return x, source, position_ids, span_ids
 
         # --- Cosine similarity between every adjacent pair -------------------
         g = self.group_proj(x)           # (B, S, gd)
@@ -44,20 +47,22 @@ class TokenMergeModule(nn.Module):
         sim = (g_norm[:, :-1] * g_norm[:, 1:]).sum(-1)  # (B, S-1)
 
         # --- Per-batch greedy selection + simultaneous merge ----------------
-        results_x, results_s, results_p = [], [], []
+        results_x, results_s, results_p, results_sp = [], [], [], []
         for b in range(B):
-            xb, sb, pb = self._select_and_merge(
-                x[b], source[b], position_ids[b],
+            xb, sb, pb, spb = self._select_and_merge(
+                x[b], source[b], position_ids[b], span_ids[b],
                 sim[b], g_norms[b], r,
             )
             results_x.append(xb)
             results_s.append(sb)
             results_p.append(pb)
+            results_sp.append(spb)
 
         return (
             torch.stack(results_x),
             torch.stack(results_s),
             torch.stack(results_p),
+            torch.stack(results_sp),
         )
 
     @staticmethod
@@ -65,10 +70,11 @@ class TokenMergeModule(nn.Module):
         x: torch.Tensor,
         source: torch.Tensor,
         pos: torch.Tensor,
+        span_ids: torch.Tensor,
         sim: torch.Tensor,
         norms: torch.Tensor,
         r: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Greedy disjoint adjacent-pair selection + simultaneous merge."""
         S = x.shape[0]
 
@@ -91,7 +97,7 @@ class TokenMergeModule(nn.Module):
                     break
 
         if not sel_i:
-            return x, source, pos
+            return x, source, pos, span_ids
 
         keep_i = torch.tensor(sel_i, device=x.device)  # (K,)
         drop_j = torch.tensor(sel_j, device=x.device)  # (K,)
@@ -108,11 +114,15 @@ class TokenMergeModule(nn.Module):
         source_out = source.clone()
         source_out[keep_i] = source[keep_i] + source[drop_j]
 
+        # span_ids accumulate the base-token count of each merged group.
+        span_out = span_ids.clone()
+        span_out[keep_i] = span_ids[keep_i] + span_ids[drop_j]
+
         # Drop the absorbed (j) tokens via a boolean mask.
         keep_mask = torch.ones(S, dtype=torch.bool, device=x.device)
         keep_mask[drop_j] = False
 
-        return x_out[keep_mask], source_out[keep_mask], pos[keep_mask]
+        return x_out[keep_mask], source_out[keep_mask], pos[keep_mask], span_out[keep_mask]
 
 
 def token_unmerge(

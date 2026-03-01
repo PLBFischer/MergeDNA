@@ -45,16 +45,18 @@ class LatentDecoder(nn.Module):
         self,
         z: torch.Tensor,
         pos_ids: Optional[torch.Tensor] = None,
+        span_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Run the latent decoder stack.
 
         Args:
             z: (B, L, D) latent embeddings.
             pos_ids: (B, L) position ids.
+            span_ids: (B, L) number of base tokens per merged token.
 
         Returns:
             z_hat: (B, L, D) reconstructed latent embeddings.
         """
         for block in self.blocks:
-            z = block(z, self.rope_freqs, pos_ids)
+            z = block(z, self.rope_freqs, pos_ids, span_ids)
         return self.norm(z)

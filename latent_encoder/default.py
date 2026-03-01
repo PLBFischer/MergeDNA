@@ -48,18 +48,20 @@ class LatentEncoder(nn.Module):
         self,
         z: torch.Tensor,
         pos_ids: Optional[torch.Tensor] = None,
+        span_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Run the full-attention latent encoder stack.
 
         Args:
             z: (B, L, D) merged token embeddings from the local encoder.
             pos_ids: (B, L) position ids.
+            span_ids: (B, L) number of base tokens per merged token.
 
         Returns:
             z_prime: (B, L, D) contextualised latent embeddings.
         """
         for block in self.blocks:
-            z = block(z, self.rope_freqs, pos_ids)
+            z = block(z, self.rope_freqs, pos_ids, span_ids)
         return self.norm(z)
 
     def merge(
@@ -67,21 +69,24 @@ class LatentEncoder(nn.Module):
         z_prime: torch.Tensor,
         source: torch.Tensor,
         pos_ids: torch.Tensor,
+        span_ids: torch.Tensor,
         K: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Global token selection (pre-training pass 2).
 
         Args:
             z_prime: (B, L, D) latent embeddings.
             source: (B, L, N_orig) source matrix.
             pos_ids: (B, L) position ids.
+            span_ids: (B, L) number of base tokens per merged token.
             K: target number of salient tokens.
 
         Returns:
             z_k: (B, K, D) selected latent tokens.
             source_prime: (B, K, N_orig) updated source matrix (S').
             pos_ids_k: (B, K) position ids of kept tokens.
+            span_ids_k: (B, K) span lengths of kept tokens.
         """
         L = z_prime.shape[1]
         r = max(0, L - K)
-        return self.global_merge(z_prime, source, pos_ids, r)
+        return self.global_merge(z_prime, source, pos_ids, span_ids, r)

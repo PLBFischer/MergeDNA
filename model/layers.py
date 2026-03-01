@@ -4,6 +4,7 @@ Foundational layers for MergeDNA.
 * ``RMSNorm``  -- LLaMA-style RMS normalisation.
 * ``precompute_rope_freqs`` / ``apply_rope`` -- Rotary Position Embeddings.
 * ``SwiGLUFFN`` -- SwiGLU feed-forward network.
+* ``SpanEncoding`` -- learned log-span conditioning.
 """
 
 import torch
@@ -75,6 +76,32 @@ def apply_rope(
 
     out = torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
     return out
+
+
+class SpanEncoding(nn.Module):
+    """Encode merged-token span length as log(1 + span) projected to model dim.
+
+    A linear projection of log(1 + span_length) is added to the residual
+    stream at the start of each block that operates on merged tokens.  Using
+    log-scale handles arbitrarily large spans without requiring a cap, and
+    reflects the natural exponential growth of span sizes across merge layers.
+    """
+
+    def __init__(self, dim: int):
+        super().__init__()
+        self.proj = nn.Linear(1, dim, bias=True)
+
+    def forward(self, span_ids: torch.Tensor) -> torch.Tensor:
+        """Project log span lengths into model dimension.
+
+        Args:
+            span_ids: (B, L) integer number of base tokens per merged token.
+
+        Returns:
+            (B, L, dim) span encoding to add to the residual stream.
+        """
+        log_span = torch.log1p(span_ids.float()).unsqueeze(-1)  # (B, L, 1)
+        return self.proj(log_span)
 
 
 class SwiGLUFFN(nn.Module):

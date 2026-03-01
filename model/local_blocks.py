@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 
 from model.attention import LocalWindowAttention
-from model.layers import RMSNorm, SwiGLUFFN
+from model.layers import RMSNorm, SpanEncoding, SwiGLUFFN
 from model.token_merge import TokenMergeModule
 
 
@@ -35,6 +35,7 @@ class LocalToMeAttentionBlock(nn.Module):
     ):
         super().__init__()
         self.window_size = window_size
+        self.span_enc = SpanEncoding(dim)
         self.norm1 = RMSNorm(dim)
         self.attn = LocalWindowAttention(dim, num_heads, window_size)
         self.norm2 = RMSNorm(dim)
@@ -46,13 +47,15 @@ class LocalToMeAttentionBlock(nn.Module):
         x: torch.Tensor,
         source: torch.Tensor,
         position_ids: torch.Tensor,
+        span_ids: torch.Tensor,
         r: int,
         rope_freqs: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        x = x + self.span_enc(span_ids)
         x = x + self.attn(self.norm1(x), rope_freqs, position_ids)
         x = x + self.ffn(self.norm2(x))
-        x, source, position_ids = self.merge(x, source, position_ids, r)
-        return x, source, position_ids
+        x, source, position_ids, span_ids = self.merge(x, source, position_ids, span_ids, r)
+        return x, source, position_ids, span_ids
 
 
 class LocalAttentionBlock(nn.Module):

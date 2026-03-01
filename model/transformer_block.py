@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 
 from model.attention import FullAttention
-from model.layers import RMSNorm, SwiGLUFFN
+from model.layers import RMSNorm, SpanEncoding, SwiGLUFFN
 
 
 class TransformerBlock(nn.Module):
@@ -22,6 +22,7 @@ class TransformerBlock(nn.Module):
         ffn_dim: int,
     ):
         super().__init__()
+        self.span_enc = SpanEncoding(dim)
         self.norm1 = RMSNorm(dim)
         self.attn = FullAttention(dim, num_heads)
         self.norm2 = RMSNorm(dim)
@@ -32,7 +33,10 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         rope_freqs: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
+        span_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if span_ids is not None:
+            x = x + self.span_enc(span_ids)
         x = x + self.attn(self.norm1(x), rope_freqs, position_ids)
         x = x + self.ffn(self.norm2(x))
         return x

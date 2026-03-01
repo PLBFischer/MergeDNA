@@ -49,9 +49,9 @@ class LossManager:
         input_ids = batch.to(device)
 
         # ---- Pass 1: Merged Token Reconstruction (MTR, Eq. 6) ----
-        z_l, source, pos_ids, r_per_layer = local_encoder(input_ids)
-        z_prime = latent_encoder(z_l, pos_ids)
-        z_hat_l = latent_decoder(z_prime, pos_ids)
+        z_l, source, pos_ids, span_ids, r_per_layer = local_encoder(input_ids)
+        z_prime = latent_encoder(z_l, pos_ids, span_ids)
+        z_hat_l = latent_decoder(z_prime, pos_ids, span_ids)
         logits_mtr = local_decoder(z_hat_l, source)
         l_mtr = self._unwrap(local_decoder).loss(
             logits_mtr, input_ids, pad_id=self.pad_token_id,
@@ -63,10 +63,10 @@ class LossManager:
         source_detached = source.detach()
 
         # Step 2: latent encoder forward pass, then merge L → K.
-        z_prime_2 = latent_encoder(z_l_detached, pos_ids)
+        z_prime_2 = latent_encoder(z_l_detached, pos_ids, span_ids)
         K = max(1, int(z_l_detached.shape[1] * self.target_latent_compression))
-        z_k, source_prime, _ = self._unwrap(latent_encoder).merge(
-            z_prime_2, source_detached, pos_ids, K,
+        z_k, source_prime, _, span_ids_k = self._unwrap(latent_encoder).merge(
+            z_prime_2, source_detached, pos_ids, span_ids, K,
         )
 
         # Step 3: unmerge K → L.
@@ -76,8 +76,8 @@ class LossManager:
         source_kl = (overlap > 0.5).float()   # (B, K, L)
         z_l_2 = token_unmerge(z_k, source_kl)  # (B, L, D)
 
-        # Step 4: latent decoder forward on L tokens.
-        z_hat_l_2 = latent_decoder(z_l_2, pos_ids)
+        # Step 4: latent decoder forward on L tokens (use original L-level span_ids).
+        z_hat_l_2 = latent_decoder(z_l_2, pos_ids, span_ids)
 
         # Step 5: local decoder unmerges L → N and produces logits.
         logits_latent_mtr = local_decoder(z_hat_l_2, source_detached)
@@ -91,11 +91,11 @@ class LossManager:
         masked_ids = input_ids.clone()
         masked_ids[mask_n] = self.pad_token_id
 
-        z_l_m, source_m, pos_ids_m, _ = local_encoder(
+        z_l_m, source_m, pos_ids_m, span_ids_m, _ = local_encoder(
             masked_ids, r_per_layer=r_per_layer,
         )
-        z_prime_m = latent_encoder(z_l_m, pos_ids_m)
-        z_hat_l_m = latent_decoder(z_prime_m, pos_ids_m)
+        z_prime_m = latent_encoder(z_l_m, pos_ids_m, span_ids_m)
+        z_hat_l_m = latent_decoder(z_prime_m, pos_ids_m, span_ids_m)
         logits_amtm = local_decoder(z_hat_l_m, source_m)
         l_amtm = self._unwrap(local_decoder).loss(
             logits_amtm, input_ids, mask=mask_n, pad_id=self.pad_token_id,

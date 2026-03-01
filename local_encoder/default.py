@@ -93,7 +93,7 @@ class LocalEncoder(nn.Module):
         self,
         input_ids: torch.Tensor,
         r_per_layer: Optional[List[int]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[int]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[int]]:
         """Encode token IDs into merged latent tokens.
 
         Args:
@@ -105,6 +105,7 @@ class LocalEncoder(nn.Module):
             z_l: (B, L, D) merged token embeddings.
             source: (B, L, N) source matrix mapping merged -> original positions.
             pos_ids: (B, L) position ids of keeper tokens.
+            span_ids: (B, L) number of base tokens in each merged token.
             r_per_layer: the merge schedule that was used (useful for AMTM pass).
         """
         B, N = input_ids.shape
@@ -123,12 +124,13 @@ class LocalEncoder(nn.Module):
             .unsqueeze(0)
             .expand(B, -1)
         )
+        span_ids = torch.ones(B, N, dtype=torch.long, device=x.device)
 
         for layer_idx, block in enumerate(self.blocks):
             r = r_per_layer[layer_idx] if layer_idx < len(r_per_layer) else 0
-            x, source, pos_ids = block(
-                x, source, pos_ids, r=r, rope_freqs=self.rope_freqs,
+            x, source, pos_ids, span_ids = block(
+                x, source, pos_ids, span_ids, r=r, rope_freqs=self.rope_freqs,
             )
 
         x = self.norm(x)
-        return x, source, pos_ids, r_per_layer
+        return x, source, pos_ids, span_ids, r_per_layer
