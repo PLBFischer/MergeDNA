@@ -1,8 +1,10 @@
+# @package _global_.experiment
+
 name: mini
 
 defaults:
-  - override /dataset: mini
-  - override /scheduler: mini
+  - /dataset: mini
+  - /scheduler: mini
 
 embed_dim: 256
 max_seq_len: 512

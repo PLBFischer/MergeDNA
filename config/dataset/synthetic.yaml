@@ -1,3 +1,5 @@
+# @package _global_.dataset
+
 _target_: dataset.synthetic.SyntheticDNADataset
 num_sequences: 1000
 max_seq_len: ${experiment.max_seq_len}

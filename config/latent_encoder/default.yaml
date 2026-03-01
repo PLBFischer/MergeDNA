@@ -1,3 +1,5 @@
+# @package _global_.latent_encoder
+
 _target_: latent_encoder.default.LatentEncoder
 embed_dim: ${experiment.embed_dim}
 num_heads: ${experiment.num_heads}

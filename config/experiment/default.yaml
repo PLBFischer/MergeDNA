@@ -1,3 +1,5 @@
+# @package _global_.experiment
+
 name: default
 
 embed_dim: 1024

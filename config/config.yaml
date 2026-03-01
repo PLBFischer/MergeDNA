@@ -1,3 +1,5 @@
+# @package _global_
+
 defaults:
   - dataset: default
   - local_encoder: default
@@ -10,6 +12,7 @@ defaults:
   - scheduler: default
   - experiment: default
   - wandb: default
+  - _self_
 
 seed: 42
 

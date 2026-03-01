@@ -1,3 +1,5 @@
+# @package _global_.loss
+
 _target_: loss.default.LossManager
 lambda_latent_mtr: 0.25
 target_latent_compression: 0.5

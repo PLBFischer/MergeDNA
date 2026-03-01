@@ -1,3 +1,5 @@
+# @package _global_.local_decoder
+
 _target_: local_decoder.default.LocalDecoder
 vocab_size: ${vocab_size}
 embed_dim: ${experiment.embed_dim}
