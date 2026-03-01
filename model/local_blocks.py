@@ -11,7 +11,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from model.attention import LocalWindowAttention
+from model.attention import Attention
 from model.layers import RMSNorm, SpanEncoding, SwiGLUFFN
 from model.token_merge import TokenMergeModule
 
@@ -37,7 +37,7 @@ class LocalToMeAttentionBlock(nn.Module):
         self.window_size = window_size
         self.span_enc = SpanEncoding(dim)
         self.norm1 = RMSNorm(dim)
-        self.attn = LocalWindowAttention(dim, num_heads, window_size)
+        self.attn = Attention(dim, num_heads, window_size)
         self.norm2 = RMSNorm(dim)
         self.ffn = SwiGLUFFN(dim, ffn_dim)
         self.merge = TokenMergeModule(dim, merge_group_dim)
@@ -73,7 +73,7 @@ class LocalAttentionBlock(nn.Module):
     ):
         super().__init__()
         self.norm1 = RMSNorm(dim)
-        self.attn = LocalWindowAttention(dim, num_heads, window_size)
+        self.attn = Attention(dim, num_heads, window_size)
         self.norm2 = RMSNorm(dim)
         self.ffn = SwiGLUFFN(dim, ffn_dim)
 

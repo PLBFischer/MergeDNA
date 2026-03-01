@@ -8,7 +8,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from model.attention import FullAttention
+from model.attention import Attention
 from model.layers import RMSNorm, SpanEncoding, SwiGLUFFN
 
 
@@ -24,7 +24,7 @@ class TransformerBlock(nn.Module):
         super().__init__()
         self.span_enc = SpanEncoding(dim)
         self.norm1 = RMSNorm(dim)
-        self.attn = FullAttention(dim, num_heads)
+        self.attn = Attention(dim, num_heads)
         self.norm2 = RMSNorm(dim)
         self.ffn = SwiGLUFFN(dim, ffn_dim)
 
