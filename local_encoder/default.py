@@ -78,13 +78,11 @@ class LocalEncoder(nn.Module):
         r_per_layer: List[int] = []
         current_len = N
         for i in range(self.num_layers):
-            n_windows = max(1, current_len // W)
             remaining_layers = self.num_layers - i
             remove_this_layer = total_to_remove // remaining_layers
-            r = max(0, min(remove_this_layer // n_windows, W - 2))
-            actual_removed = r * n_windows
-            total_to_remove -= actual_removed
-            current_len -= actual_removed
+            r = max(0, min(remove_this_layer, current_len // 2))
+            total_to_remove -= r
+            current_len -= r
             r_per_layer.append(r)
 
         return r_per_layer

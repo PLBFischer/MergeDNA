@@ -100,17 +100,18 @@ class TokenMergeModule(nn.Module):
                     break
 
         if len(sel_i) < r:
-            # Similarity-only greedy matching on a path can get stuck in a
-            # maximal (but not maximum) matching, yielding too few merges.
-            # Fallback to deterministic left-to-right pairing to guarantee
-            # exactly r merges so all batch elements keep the same length.
-            sel_i = []
-            sel_j = []
-            for i in range(0, S - 1, 2):
-                sel_i.append(i)
-                sel_j.append(i + 1)
+            # Greedy can get stuck in a maximal-but-not-maximum matching.
+            # Augment by scanning left-to-right for unmatched adjacent pairs,
+            # keeping all similarity-based pairs already found.
+            for i in range(S - 1):
                 if len(sel_i) == r:
                     break
+                j = i + 1
+                if i not in used and j not in used:
+                    sel_i.append(i)
+                    sel_j.append(j)
+                    used.add(i)
+                    used.add(j)
 
         keep_i = torch.tensor(sel_i, device=x.device)  # (K,)
         drop_j = torch.tensor(sel_j, device=x.device)  # (K,)
