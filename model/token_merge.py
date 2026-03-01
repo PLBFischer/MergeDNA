@@ -77,6 +77,9 @@ class TokenMergeModule(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Greedy disjoint adjacent-pair selection + simultaneous merge."""
         S = x.shape[0]
+        r = max(0, min(int(r), S // 2))
+        if r == 0:
+            return x, source, pos, span_ids
 
         # Sort pairs by similarity descending; stable for determinism on ties.
         order_list = torch.argsort(-sim, stable=True).tolist()
@@ -96,8 +99,18 @@ class TokenMergeModule(nn.Module):
                 if len(sel_i) == r:
                     break
 
-        if not sel_i:
-            return x, source, pos, span_ids
+        if len(sel_i) < r:
+            # Similarity-only greedy matching on a path can get stuck in a
+            # maximal (but not maximum) matching, yielding too few merges.
+            # Fallback to deterministic left-to-right pairing to guarantee
+            # exactly r merges so all batch elements keep the same length.
+            sel_i = []
+            sel_j = []
+            for i in range(0, S - 1, 2):
+                sel_i.append(i)
+                sel_j.append(i + 1)
+                if len(sel_i) == r:
+                    break
 
         keep_i = torch.tensor(sel_i, device=x.device)  # (K,)
         drop_j = torch.tensor(sel_j, device=x.device)  # (K,)
