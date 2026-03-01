@@ -132,10 +132,11 @@ class Trainer:
             f"on {device} (target {self.total_epochs} epochs) | AMP: {amp_label}"
         )
 
-        for epoch in range(start_epoch, self.total_epochs):
-            running_loss = 0.0
-            t0 = time.time()
+        running_loss = 0.0
+        steps_in_window = 0
+        t0 = time.time()
 
+        for epoch in range(start_epoch, self.total_epochs):
             for batch_idx, batch in enumerate(dataloader):
                 optimizer.zero_grad(set_to_none=True)
 
@@ -163,14 +164,14 @@ class Trainer:
                 scheduler.step()
 
                 running_loss += loss.item()
+                steps_in_window += 1
                 global_step += 1
 
                 if global_step % self.log_interval == 0:
                     elapsed = time.time() - t0
-                    steps_since_log = self.log_interval
-                    throughput = steps_since_log / elapsed
+                    throughput = steps_in_window / elapsed
                     lr = optimizer.param_groups[0]["lr"]
-                    avg = running_loss / steps_since_log
+                    avg = running_loss / steps_in_window
                     self.logger.info(
                         f"epoch {epoch + 1}/{self.total_epochs} "
                         f"step {global_step:>6d} | loss {avg:.4f} | "
@@ -193,6 +194,7 @@ class Trainer:
                             step=global_step,
                         )
                     running_loss = 0.0
+                    steps_in_window = 0
                     t0 = time.time()
 
             self.logger.info(
