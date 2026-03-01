@@ -13,8 +13,6 @@ breakdown dictionary for logging.
 
 import torch
 
-from model.token_merge import token_unmerge
-
 
 class LossManager:
     def __init__(
@@ -64,9 +62,8 @@ class LossManager:
         z_k, source_prime = self._unwrap(latent_encoder).merge(
             z_prime_2, source.detach(), K,
         )
-        z_hat_l_2 = token_unmerge(z_k, source_prime)
-        z_hat_l_2 = latent_decoder(z_hat_l_2, None)
-        logits_latent_mtr = local_decoder(z_hat_l_2, source)
+        z_hat_k = latent_decoder(z_k, None)
+        logits_latent_mtr = local_decoder(z_hat_k, source_prime)
         l_latent_mtr = self._unwrap(local_decoder).loss(
             logits_latent_mtr, input_ids, pad_id=self.pad_token_id,
         )
