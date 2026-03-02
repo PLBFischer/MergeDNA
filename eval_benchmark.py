@@ -19,22 +19,109 @@ Example:
 import argparse
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
+import pandas as pd
+import pyfaidx
 import torch
 from omegaconf import OmegaConf
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, classification_report
 from sklearn.preprocessing import StandardScaler
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from genomic_benchmarks.dataset_getters.pytorch_datasets import get_dataset
-from genomic_benchmarks.data_check import list_datasets
 from local_encoder.default import LocalEncoder
 from latent_encoder.default import LatentEncoder
 from utils.dna import NUCLEOTIDE_MAP, PAD_ID
+
+# ──────────────────────── local benchmark dataset ───────────────────────────
+
+_REPO_ROOT = Path(__file__).parent
+_LOCAL_DATASETS_DIR = _REPO_ROOT / "genomic_benchmarks" / "datasets"
+_LOCAL_FASTA = _REPO_ROOT / "hg38.fa"
+
+# Maps benchmark name → default FASTA filename (in the repo root).
+# Override with --fasta if you have the file under a different name.
+_BENCHMARK_FASTA: dict[str, str] = {
+    "human_nontata_promoters":       "hg38.fa",
+    "human_enhancers_cohn":          "hg38.fa",
+    "human_enhancers_ensembl":       "hg38.fa",
+    "human_ensembl_regulatory":      "hg38.fa",
+    "human_ocr_ensembl":             "hg38.fa",
+    "demo_human_or_worm":            None,   # mixed — pass --fasta per class; unsupported
+    "demo_coding_vs_intergenomic_seqs": None,  # transcript coords; unsupported
+    "dummy_mouse_enhancers_ensembl": "mm10.fa",
+    "drosophila_enhancers_stark":    "dm6.fa",
+}
+
+_COMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
+
+
+def _revcomp(seq: str) -> str:
+    return seq.translate(_COMP)[::-1]
+
+
+class LocalGenomicDataset(Dataset):
+    """
+    Reads directly from the local cloned genomic_benchmarks repo (CSV.gz files)
+    and fetches sequences on-the-fly from a local FASTA via pyfaidx.
+    No downloads and no per-sequence cache files are ever written to disk.
+    """
+
+    def __init__(
+        self,
+        benchmark_name: str,
+        split: str,
+        datasets_dir: Path = _LOCAL_DATASETS_DIR,
+        fasta_path: Path = _LOCAL_FASTA,
+    ):
+        split_dir = datasets_dir / benchmark_name / split
+        if not split_dir.exists():
+            raise FileNotFoundError(
+                f"Local benchmark split not found: {split_dir}\n"
+                f"Available benchmarks: {[d.name for d in datasets_dir.iterdir() if d.is_dir()]}"
+            )
+
+        print(f"  Building {benchmark_name}/{split} from {split_dir} …", flush=True)
+        print(f"  Loading FASTA index for {fasta_path} (first run builds .fai) …", flush=True)
+        fasta = pyfaidx.Fasta(str(fasta_path), sequence_always_upper=True)
+
+        self.sequences: list[str] = []
+        self.labels: list[int] = []
+
+        csv_files = sorted(split_dir.glob("*.csv.gz"))
+        if not csv_files:
+            raise FileNotFoundError(f"No *.csv.gz files found in {split_dir}")
+
+        for label_idx, csv_path in enumerate(csv_files):
+            label_name = csv_path.name.replace(".csv.gz", "")
+            df = pd.read_csv(csv_path)
+            print(f"    {label_name}: {len(df)} sequences", flush=True)
+            for _, row in df.iterrows():
+                chrom, start, end, strand = row["region"], int(row["start"]), int(row["end"]), row["strand"]
+                try:
+                    seq = str(fasta[chrom][start:end])
+                except (KeyError, pyfaidx.FetchError):
+                    seq = "N" * (end - start)
+                if strand == "-":
+                    seq = _revcomp(seq)
+                self.sequences.append(seq)
+                self.labels.append(label_idx)
+
+        fasta.close()
+
+    def __len__(self) -> int:
+        return len(self.sequences)
+
+    def __getitem__(self, idx: int):
+        return self.sequences[idx], self.labels[idx]
+
+
+def list_local_benchmarks(datasets_dir: Path = _LOCAL_DATASETS_DIR) -> list[str]:
+    return sorted(d.name for d in datasets_dir.iterdir() if d.is_dir())
 
 
 # ──────────────────────────── checkpoint helpers ────────────────────────────
@@ -159,6 +246,8 @@ def main():
                         help="Path to the training output folder (contains checkpoints + config.yaml)")
     parser.add_argument("--benchmark", type=str, default="human_nontata_promoters",
                         help="Benchmark name (default: human_nontata_promoters)")
+    parser.add_argument("--fasta", type=str, default=None,
+                        help="Path to the reference FASTA (auto-selected by benchmark if omitted)")
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--list_benchmarks", action="store_true",
@@ -166,9 +255,11 @@ def main():
     args = parser.parse_args()
 
     if args.list_benchmarks:
-        print("Available genomic benchmarks:")
-        for name in list_datasets():
-            print(f"  - {name}")
+        print("Available local genomic benchmarks:")
+        for name in list_local_benchmarks():
+            default_fa = _BENCHMARK_FASTA.get(name, "hg38.fa")
+            supported = "✓" if default_fa else "✗ (unsupported)"
+            print(f"  - {name}  [{default_fa or 'unsupported'}]  {supported}")
         return
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -194,8 +285,23 @@ def main():
 
     # ── Benchmark data ──
     print(f"\nBenchmark: {args.benchmark}")
-    train_dset = get_dataset(args.benchmark, "train", version=0)
-    test_dset = get_dataset(args.benchmark, "test", version=0)
+    if args.fasta:
+        fasta_path = Path(args.fasta)
+    else:
+        default_fa = _BENCHMARK_FASTA.get(args.benchmark)
+        if default_fa is None:
+            sys.exit(
+                f"Benchmark '{args.benchmark}' is not supported (mixed or transcript-based coords).\n"
+                f"Supported benchmarks: {[k for k, v in _BENCHMARK_FASTA.items() if v]}"
+            )
+        fasta_path = _REPO_ROOT / default_fa
+    if not fasta_path.exists():
+        sys.exit(
+            f"FASTA not found: {fasta_path}\n"
+            f"Download it and place it at that path, or pass --fasta <path>."
+        )
+    train_dset = LocalGenomicDataset(args.benchmark, "train", fasta_path=fasta_path)
+    test_dset = LocalGenomicDataset(args.benchmark, "test", fasta_path=fasta_path)
     print(f"  train={len(train_dset)}  test={len(test_dset)}")
 
     collate = lambda batch: _collate(batch, max_seq_len)
