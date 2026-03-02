@@ -1,12 +1,3 @@
-"""
-Foundational layers for MergeDNA.
-
-* ``RMSNorm``  -- LLaMA-style RMS normalisation.
-* ``precompute_rope_freqs`` / ``apply_rope`` -- Rotary Position Embeddings.
-* ``SwiGLUFFN`` -- SwiGLU feed-forward network.
-* ``SpanEncoding`` -- learned log-span conditioning.
-"""
-
 from typing import Optional
 
 import torch

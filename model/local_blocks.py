@@ -1,11 +1,3 @@
-"""Local attention blocks for MergeDNA.
-
-* ``LocalToMeAttentionBlock`` -- local-window attention followed by
-  differentiable token merging (used in Local Encoder).
-* ``LocalAttentionBlock`` -- local-window attention without merging
-  (used in Local Decoder).
-"""
-
 from typing import Optional, Tuple, Union
 
 import torch

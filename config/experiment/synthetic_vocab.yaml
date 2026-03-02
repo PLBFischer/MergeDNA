@@ -1,9 +1,9 @@
 # @package _global_.experiment
 
-name: synth
+name: synth_vocab
 
 defaults:
-  - /dataset: synthetic
+  - /dataset: synthetic_vocab
   - /scheduler: nano
   - /training: default1000_pll
 

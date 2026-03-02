@@ -10,12 +10,13 @@ from utils.dna import encode_sequence
 BASES = "ATCG"
 
 
-class SyntheticDNADataset(Dataset):
-    """Generates periodic DNA sequences from random k-mers for quick testing.
+class SyntheticVocabDNADataset(Dataset):
+    """Generates DNA sequences by concatenating k-mers from a shared vocabulary.
 
-    Each sequence is built by sampling a random k-mer (with k drawn uniformly
-    from [min_k, max_k]) and repeating it (max_seq_len // k) times, producing
-    a periodically repeating pattern truncated to max_seq_len.
+    A fixed vocabulary of k-mers (lengths drawn uniformly from [min_k, max_k])
+    is sampled once.  Each sequence is then built by randomly concatenating
+    vocabulary k-mers until the target length (drawn uniformly from
+    [min_seq_len, max_seq_len]) is reached, then truncating to that length.
 
     Sequences are persisted to a FASTA file and reloaded on subsequent
     instantiations to avoid redundant generation.
@@ -23,21 +24,24 @@ class SyntheticDNADataset(Dataset):
 
     def __init__(
         self,
-        num_sequences: int = 100000,
+        num_sequences: int = 100_000,
+        min_seq_len: int = 24,
         max_seq_len: int = 32,
+        vocab_size: int = 100,
         min_k: int = 2,
         max_k: int = 8,
         seed: int = 42,
         fasta_path: Optional[str] = None,
-        dataset_len: int = 10000,
+        dataset_len: int = 10_000,
     ):
         self.max_seq_len = max_seq_len
         self.sequences: List[str] = []
         self.dataset_len = dataset_len
+
         if fasta_path is None:
             fasta_path = (
-                f"synthetic_n{num_sequences}_len{max_seq_len}"
-                f"_k{min_k}-{max_k}_seed{seed}_len{dataset_len}.fasta"
+                f"synthetic_vocab_n{num_sequences}_len{min_seq_len}-{max_seq_len}"
+                f"_v{vocab_size}_k{min_k}-{max_k}_seed{seed}.fasta"
             )
         self._fasta_path = Path(fasta_path)
 
@@ -45,12 +49,22 @@ class SyntheticDNADataset(Dataset):
             self.sequences = self._load_fasta(self._fasta_path)
         else:
             rng = random.Random(seed)
-            for _ in range(num_sequences):
+
+            vocab = []
+            for _ in range(vocab_size):
                 k = rng.randint(min_k, max_k)
-                kmer = "".join(rng.choice(BASES) for _ in range(k))
-                repeats = max_seq_len // k
-                seq = (kmer * repeats)[:max_seq_len]
-                self.sequences.append(seq)
+                vocab.append("".join(rng.choice(BASES) for _ in range(k)))
+
+            for _ in range(num_sequences):
+                target_len = rng.randint(min_seq_len, max_seq_len)
+                parts: List[str] = []
+                length = 0
+                while length < target_len:
+                    kmer = rng.choice(vocab)
+                    parts.append(kmer)
+                    length += len(kmer)
+                self.sequences.append("".join(parts)[:target_len])
+
             self._save_fasta(self._fasta_path, self.sequences)
 
     @staticmethod

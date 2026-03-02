@@ -1,7 +1,6 @@
 # @package _global_
 
 defaults:
-  - dataset: default
   - local_encoder: default
   - latent_encoder: default
   - latent_decoder: default
