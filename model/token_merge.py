@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -17,7 +17,7 @@ class TokenMergeModule(nn.Module):
         source: torch.Tensor,
         position_ids: torch.Tensor,
         span_ids: torch.Tensor,
-        r: int,
+        r: Union[int, torch.Tensor],
         pad_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Merge *r* adjacent token pairs.
@@ -62,9 +62,10 @@ class TokenMergeModule(nn.Module):
         # --- Per-batch greedy selection + simultaneous merge ----------------
         results_x, results_s, results_p, results_sp = [], [], [], []
         for b in range(B):
+            r_b = int(r[b].item()) if isinstance(r, torch.Tensor) else r
             xb, sb, pb, spb = self._select_and_merge(
                 x[b], source[b], position_ids[b], span_ids[b],
-                sim[b], g_norms[b], r,
+                sim[b], g_norms[b], r_b,
             )
             results_x.append(xb)
             results_s.append(sb)

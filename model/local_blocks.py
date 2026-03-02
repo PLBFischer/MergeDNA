@@ -6,7 +6,7 @@
   (used in Local Decoder).
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -48,7 +48,7 @@ class LocalToMeAttentionBlock(nn.Module):
         source: torch.Tensor,
         position_ids: torch.Tensor,
         span_ids: torch.Tensor,
-        r: int,
+        r: Union[int, torch.Tensor],
         rope_freqs: Optional[torch.Tensor] = None,
         pad_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:

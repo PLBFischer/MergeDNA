@@ -57,12 +57,27 @@ class LocalEncoder(nn.Module):
         ])
         self.norm = RMSNorm(embed_dim)
 
-    def _sample_r_per_layer(self, N: int, device: torch.device) -> List[int]:
-        """Sample per-layer merge counts achieving a sampled compression ratio.
+    def _sample_r_per_layer(
+        self, content_lengths: torch.Tensor,
+    ) -> torch.Tensor:
+        """Sample per-layer merge counts relative to *content* (non-padding) length.
+
+        Compression is applied only to real bases, so the ratio always means
+        what it says regardless of how much padding a sequence has.
 
         During training the ratio is sampled from a Gaussian; at eval time the
         mean ratio is used deterministically.
+
+        Args:
+            content_lengths: (B,) int tensor of non-padding base counts.
+
+        Returns:
+            r_schedule: (B, num_layers) int tensor — per-sequence per-layer
+                merge counts.
         """
+        B = content_lengths.shape[0]
+        device = content_lengths.device
+
         if self.training:
             ratio = torch.empty(1, device=device).normal_(
                 self.compression_ratio_mean,
@@ -71,40 +86,55 @@ class LocalEncoder(nn.Module):
         else:
             ratio = self.compression_ratio_mean
 
-        L_target = max(1, int(N * ratio))
-        total_to_remove = N - L_target
+        # Use the minimum content length in the batch to compute a single
+        # total_to_remove that is safe for all sequences.  Every sequence
+        # compresses at least as much as the shortest one requires; longer
+        # sequences are very slightly under-compressed (by at most a few tokens)
+        # but all produce the same output length, keeping tensor shapes fixed.
+        min_content = int(content_lengths.min().item())
+        L_target = max(1, int(min_content * ratio))
+        total_to_remove = min_content - L_target
 
         base = total_to_remove // self.num_layers
         remainder = total_to_remove - base * self.num_layers
 
-        r_per_layer = [base] * self.num_layers
-        r_per_layer[-1] += remainder
-        return r_per_layer
+        r_schedule = content_lengths.new_full((B, self.num_layers), base)
+        r_schedule[:, -1] += remainder
+
+        return r_schedule
 
     def forward(
         self,
         input_ids: torch.Tensor,
-        r_per_layer: Optional[List[int]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[int]]:
+        r_per_layer: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Encode token IDs into merged latent tokens.
 
         Args:
             input_ids: (B, N) integer token ids.
-            r_per_layer: optional predetermined merge schedule. When ``None``
-                a new schedule is sampled via ``_sample_r_per_layer``.
+            r_per_layer: optional (B, num_layers) int tensor of predetermined
+                merge counts (used in the AMTM pass to reuse pass-1 schedule).
+                When ``None`` a new schedule is sampled via
+                ``_sample_r_per_layer`` based on each sequence's content length.
 
         Returns:
             z_l: (B, L, D) merged token embeddings.
             source: (B, L, N) source matrix mapping merged -> original positions.
             pos_ids: (B, L) position ids of keeper tokens.
             span_ids: (B, L) number of base tokens in each merged token.
-            r_per_layer: the merge schedule that was used (useful for AMTM pass).
+            r_per_layer: (B, num_layers) the merge schedule used (passed back
+                for the AMTM pass).
         """
         B, N = input_ids.shape
         x = self.token_embed(input_ids)
 
+        # Real-base mask: 1 for content positions, 0 for padding.
+        # Kept at original length N; source accumulates the mapping as tokens merge.
+        pad_mask = (input_ids != self.token_embed.padding_idx).float()  # (B, N)
+
         if r_per_layer is None:
-            r_per_layer = self._sample_r_per_layer(N, input_ids.device)
+            content_lengths = pad_mask.sum(dim=-1).long()  # (B,)
+            r_per_layer = self._sample_r_per_layer(content_lengths)
 
         source = (
             torch.eye(N, device=x.device, dtype=x.dtype)
@@ -118,13 +148,8 @@ class LocalEncoder(nn.Module):
         )
         span_ids = torch.ones(B, N, dtype=torch.long, device=x.device)
 
-        # Real-base mask: 1 for content positions, 0 for padding.
-        # Kept at original length N throughout; source handles the mapping
-        # as tokens are merged across layers.
-        pad_mask = (input_ids != self.token_embed.padding_idx).float()  # (B, N)
-
         for layer_idx, block in enumerate(self.blocks):
-            r = r_per_layer[layer_idx] if layer_idx < len(r_per_layer) else 0
+            r = r_per_layer[:, layer_idx]  # (B,) per-sequence merge count
             x, source, pos_ids, span_ids = block(
                 x, source, pos_ids, span_ids, r=r, rope_freqs=self.rope_freqs,
                 pad_mask=pad_mask,
