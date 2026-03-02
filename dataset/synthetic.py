@@ -23,7 +23,7 @@ class SyntheticDNADataset(Dataset):
 
     def __init__(
         self,
-        num_sequences: int = 1000,
+        num_sequences: int = 100000,
         max_seq_len: int = 32,
         min_k: int = 2,
         max_k: int = 8,
@@ -76,7 +76,7 @@ class SyntheticDNADataset(Dataset):
                 f.write(f">seq{i}\n{seq}\n")
 
     def __len__(self) -> int:
-        return len(self.sequences)
+        return 5000
 
     def __getitem__(self, idx: int) -> torch.Tensor:
         return encode_sequence(self.sequences[idx], self.max_seq_len)
