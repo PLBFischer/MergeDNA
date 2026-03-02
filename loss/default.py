@@ -87,7 +87,7 @@ class LossManager:
 
         # ---- Pass 3: Adaptive Masked Token Modeling (AMTM, Eq. 7) ----
         K = source_prime.shape[1]
-        mask_n = self._compute_amtm_mask(source_prime, source, K, base_pad_mask)
+        mask_n = self._compute_amtm_mask(source_kl, source, K, base_pad_mask, seq_pad_mask)
 
         masked_ids = input_ids.clone()
         masked_ids[mask_n] = self.mask_token_id
@@ -114,52 +114,54 @@ class LossManager:
 
     @staticmethod
     def _compute_amtm_mask(
-        source_prime: torch.Tensor,
+        source_kl: torch.Tensor,
         source: torch.Tensor,
         K: int,
         base_pad_mask: torch.Tensor,
+        seq_pad_mask: torch.Tensor,
     ) -> torch.Tensor:
         """Compute the AMTM mask via importance-weighted sampling (Sec 3.4).
 
-        Tokens in smaller latent groups are considered more important and
-        are more likely to be masked, forcing the model to reconstruct
-        fine-grained regions.
+        Operates at the local-token (L) level: samples K local tokens to
+        mask, then expands to base positions via the source matrix so that
+        all bases belonging to a masked merged token are masked together.
 
         Args:
-            source_prime: (B, K, N_orig) source matrix from pass 2 latent merge.
-            source: (B, L, N_orig) source matrix from local encoder.
-            K: number of latent tokens selected.
-            base_pad_mask: (B, N_orig) bool — ``True`` for real bases.
-                Padding positions are excluded from the sampling distribution.
+            source_kl: (B, K, L) source matrix from pass-2 latent merging,
+                mapping K latent tokens to L local tokens.
+            source: (B, L, N) source matrix from the local encoder.
+            K: number of local tokens to mask.
+            base_pad_mask: (B, N) bool — ``True`` for real bases.
+            seq_pad_mask: (B, L) bool — ``True`` for real local tokens.
 
         Returns:
             mask_n: (B, N) boolean base-level mask.
         """
-        group_sizes = source_prime.sum(dim=-1)  # (B, K)
+        # gi = number of local tokens grouped into latent token i
+        group_sizes = source_kl.sum(dim=-1)  # (B, K)
         weights = 1.0 / (group_sizes + 1e-8)  # (B, K)
 
-        w_per_base = torch.bmm(
+        # PL(j) ∝ wi / gi = 1/gi² for local token j in latent group i
+        w_per_local = torch.bmm(
             weights.unsqueeze(1) / (group_sizes.unsqueeze(1) + 1e-8),
-            source_prime.float(),
-        ).squeeze(1)  # (B, N_orig)
+            source_kl,
+        ).squeeze(1)  # (B, L)
 
-        # Zero out padding positions so they are never sampled for masking.
-        w_per_base = w_per_base.clamp(min=0)
-        w_per_base = w_per_base * base_pad_mask.float()
+        w_per_local = w_per_local.clamp(min=0) * seq_pad_mask.float()
 
-        total = w_per_base.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-        probs = w_per_base / total
+        total = w_per_local.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        probs = w_per_local / total  # (B, L)
 
-        n_mask = min(K, probs.shape[1])
+        L = probs.shape[1]
+        n_mask = min(K, L)
         indices = torch.multinomial(probs, n_mask, replacement=False)
-        mask = torch.zeros_like(probs, dtype=torch.bool)
-        mask.scatter_(1, indices, True)
+        mask_l = torch.zeros(probs.shape[0], L, dtype=torch.bool, device=probs.device)
+        mask_l.scatter_(1, indices, True)  # (B, L)
 
-        # The mask is already at base level (N_orig) since source_prime
-        # maps K latent tokens -> N_orig base positions.
-        if mask.shape[1] == source.shape[2]:
-            return mask
+        # Expand L-level mask to N bases: MN = S^T @ ML
+        mask_n = torch.bmm(
+            source.transpose(1, 2).float(),
+            mask_l.unsqueeze(-1).float(),
+        ).squeeze(-1) > 0.5  # (B, N)
 
-        expanded = mask.unsqueeze(-1).float()
-        base_mask = torch.bmm(source.transpose(1, 2).float(), expanded)
-        return base_mask.squeeze(-1) > 0.5
+        return mask_n & base_pad_mask
