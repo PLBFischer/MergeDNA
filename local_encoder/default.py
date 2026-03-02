@@ -101,7 +101,7 @@ class LocalEncoder(nn.Module):
         self,
         input_ids: torch.Tensor,
         r_per_layer: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Encode token IDs into merged latent tokens.
 
         Args:
@@ -118,6 +118,8 @@ class LocalEncoder(nn.Module):
             span_ids: (B, L) number of base tokens in each merged token.
             r_per_layer: (B, num_layers) the merge schedule used (passed back
                 for the AMTM pass).
+            seq_pad_mask: (B, L) bool — ``True`` for real-content tokens,
+                ``False`` for padding-derived positions in the merged sequence.
         """
         B, N = input_ids.shape
         x = self.token_embed(input_ids)
@@ -142,12 +144,19 @@ class LocalEncoder(nn.Module):
         )
         span_ids = torch.ones(B, N, dtype=torch.long, device=x.device)
 
+        # Current-position padding mask (True = real). Recomputed after each
+        # merge because the sequence length and indexing change.
+        seq_pad_mask = pad_mask.bool()  # (B, N)
+
         for layer_idx, block in enumerate(self.blocks):
             r = r_per_layer[:, layer_idx]  # (B,) per-sequence merge count
             x, source, pos_ids, span_ids = block(
                 x, source, pos_ids, span_ids, r=r, rope_freqs=self.rope_freqs,
-                pad_mask=pad_mask,
+                pad_mask=pad_mask, seq_pad_mask=seq_pad_mask,
             )
+            # Recompute current-position mask from source after merge.
+            content = torch.bmm(source, pad_mask.unsqueeze(-1)).squeeze(-1)  # (B, S')
+            seq_pad_mask = content > 1e-6  # (B, S')
 
         x = self.norm(x)
-        return x, source, pos_ids, span_ids, r_per_layer
+        return x, source, pos_ids, span_ids, r_per_layer, seq_pad_mask

@@ -51,7 +51,16 @@ class Attention(nn.Module):
         x: torch.Tensor,
         rope_freqs: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        """
+        Args:
+            x: (B, S, D) input embeddings.
+            rope_freqs: precomputed RoPE angle table.
+            position_ids: (B, S) absolute position indices.
+            key_padding_mask: (B, S) bool — ``True`` = real token,
+                ``False`` = padding (will be masked out of attention).
+        """
         B, S, _ = x.shape
         H, hd = self.num_heads, self.head_dim
 
@@ -67,7 +76,12 @@ class Attention(nn.Module):
             q = q.permute(0, 2, 1, 3)
             k = k.permute(0, 2, 1, 3)
             v = v.permute(0, 2, 1, 3)
-            attn_out = F.scaled_dot_product_attention(q, k, v)
+
+            attn_mask: Optional[torch.Tensor] = None
+            if key_padding_mask is not None:
+                attn_mask = key_padding_mask[:, None, None, :]  # (B, 1, 1, S)
+
+            attn_out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
             out = attn_out.permute(0, 2, 1, 3).reshape(B, S, H * hd)
         else:
             W = self.window_size
@@ -91,16 +105,24 @@ class Attention(nn.Module):
             v_flat = v_windows.permute(0, 2, 1, 3, 4).reshape(B * S, H, W, hd)
 
             # Boolean mask (True = attend) excluding zero-padded boundary slots.
-            # Shape: (B*S, 1, 1, W)
             seq_idx = torch.arange(S, device=x.device)
             win_idx = torch.arange(W, device=x.device)
             real_pos = seq_idx.unsqueeze(1) + win_idx.unsqueeze(0) - left_pad  # (S, W)
-            attn_mask = (real_pos >= 0) & (real_pos < S)
-            attn_mask = (
-                attn_mask.unsqueeze(0).unsqueeze(2)  # (1, S, 1, W)
-                .expand(B, -1, -1, -1)               # (B, S, 1, W)
-                .reshape(B * S, 1, 1, W)
-            )
+            attn_mask = (real_pos >= 0) & (real_pos < S)  # (S, W)
+
+            if key_padding_mask is not None:
+                # Expand per-position padding mask into window coordinates.
+                # Pad with False (= masked) to match the k/v padding scheme.
+                kpm_padded = F.pad(key_padding_mask, (left_pad, right_pad), value=False)  # (B, S+W-1)
+                kpm_windows = kpm_padded.unfold(-1, W, 1)  # (B, S, W)
+                attn_mask = attn_mask.unsqueeze(0) & kpm_windows  # (B, S, W)
+                attn_mask = attn_mask.unsqueeze(2).reshape(B * S, 1, 1, W)
+            else:
+                attn_mask = (
+                    attn_mask.unsqueeze(0).unsqueeze(2)  # (1, S, 1, W)
+                    .expand(B, -1, -1, -1)               # (B, S, 1, W)
+                    .reshape(B * S, 1, 1, W)
+                )
 
             attn_out = F.scaled_dot_product_attention(q_flat, k_flat, v_flat, attn_mask=attn_mask)
             # (B*S, H, 1, hd) -> (B*S, H, hd) -> (B, S, H*hd)

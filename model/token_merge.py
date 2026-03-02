@@ -72,6 +72,17 @@ class TokenMergeModule(nn.Module):
             results_p.append(pb)
             results_sp.append(spb)
 
+        # Pad to the longest output in the batch so torch.stack succeeds
+        # when per-sequence merge counts differ (variable content lengths).
+        max_len = max(xb.shape[0] for xb in results_x)
+        for i in range(len(results_x)):
+            pad_len = max_len - results_x[i].shape[0]
+            if pad_len > 0:
+                results_x[i] = F.pad(results_x[i], (0, 0, 0, pad_len))
+                results_s[i] = F.pad(results_s[i], (0, 0, 0, pad_len))
+                results_p[i] = F.pad(results_p[i], (0, pad_len))
+                results_sp[i] = F.pad(results_sp[i], (0, pad_len))
+
         return (
             torch.stack(results_x),
             torch.stack(results_s),

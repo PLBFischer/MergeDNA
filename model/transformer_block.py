@@ -34,9 +34,10 @@ class TransformerBlock(nn.Module):
         rope_freqs: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
         span_ids: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if span_ids is not None:
-            x = x + self.span_enc(span_ids)
-        x = x + self.attn(self.norm1(x), rope_freqs, position_ids)
+            x = x + self.span_enc(span_ids, padding_mask=key_padding_mask)
+        x = x + self.attn(self.norm1(x), rope_freqs, position_ids, key_padding_mask=key_padding_mask)
         x = x + self.ffn(self.norm2(x))
         return x

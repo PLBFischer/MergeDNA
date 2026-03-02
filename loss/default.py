@@ -47,11 +47,16 @@ class LossManager:
         """
         input_ids = batch.to(device)
 
+        # Base-level padding mask (True = real base, False = pad) — constant
+        # across all three passes; used for attention masking and AMTM.
+        base_pad_mask = input_ids != self.pad_token_id          # (B, N) bool
+        pad_mask_float = base_pad_mask.float()                  # (B, N) float for merge
+
         # ---- Pass 1: Merged Token Reconstruction (MTR, Eq. 6) ----
-        z_l, source, pos_ids, span_ids, r_per_layer = local_encoder(input_ids)
-        z_prime = latent_encoder(z_l, pos_ids, span_ids)
-        z_hat_l = latent_decoder(z_prime, pos_ids, span_ids)
-        logits_mtr = local_decoder(z_hat_l, source)
+        z_l, source, pos_ids, span_ids, r_per_layer, seq_pad_mask = local_encoder(input_ids)
+        z_prime = latent_encoder(z_l, pos_ids, span_ids, key_padding_mask=seq_pad_mask)
+        z_hat_l = latent_decoder(z_prime, pos_ids, span_ids, key_padding_mask=seq_pad_mask)
+        logits_mtr = local_decoder(z_hat_l, source, base_pad_mask=base_pad_mask)
         l_mtr = local_decoder.loss(
             logits_mtr, input_ids, pad_id=self.pad_token_id,
         )
@@ -59,11 +64,14 @@ class LossManager:
         # ---- Pass 2: Latent MTR (phi frozen, Eq. 6 with detached z_l) ----
         z_l_detached = z_l.detach()
         source_detached = source.detach()
+        seq_pad_mask_det = seq_pad_mask.detach()
 
         # Progressive L→K merging with phi frozen; produces source_prime used
         # in pass 3 to compute the AMTM mask.
         z_k, source_prime, _, _, _ = latent_encoder.forward_merged(
             z_l_detached, source_detached, pos_ids, span_ids,
+            key_padding_mask=seq_pad_mask_det,
+            pad_mask=pad_mask_float,
         )
 
         # Unmerge K → L: source_prime (B, K, N) @ source_detached^T (B, N, L) = (B, K, L)
@@ -71,25 +79,25 @@ class LossManager:
         source_kl = (overlap > 0.5).float()   # (B, K, L)
         z_l_2 = token_unmerge(z_k, source_kl)  # (B, L, D)
 
-        z_hat_l_2 = latent_decoder(z_l_2, pos_ids, span_ids)
-        logits_latent_mtr = local_decoder(z_hat_l_2, source_detached)
+        z_hat_l_2 = latent_decoder(z_l_2, pos_ids, span_ids, key_padding_mask=seq_pad_mask_det)
+        logits_latent_mtr = local_decoder(z_hat_l_2, source_detached, base_pad_mask=base_pad_mask)
         l_latent_mtr = local_decoder.loss(
             logits_latent_mtr, input_ids, pad_id=self.pad_token_id,
         )
 
         # ---- Pass 3: Adaptive Masked Token Modeling (AMTM, Eq. 7) ----
         K = source_prime.shape[1]
-        mask_n = self._compute_amtm_mask(source_prime, source, K)
+        mask_n = self._compute_amtm_mask(source_prime, source, K, base_pad_mask)
 
         masked_ids = input_ids.clone()
         masked_ids[mask_n] = self.mask_token_id
 
-        z_l_m, source_m, pos_ids_m, span_ids_m, _ = local_encoder(
+        z_l_m, source_m, pos_ids_m, span_ids_m, _, seq_pad_mask_m = local_encoder(
             masked_ids, r_per_layer=r_per_layer,
         )
-        z_prime_m = latent_encoder(z_l_m, pos_ids_m, span_ids_m)
-        z_hat_l_m = latent_decoder(z_prime_m, pos_ids_m, span_ids_m)
-        logits_amtm = local_decoder(z_hat_l_m, source_m)
+        z_prime_m = latent_encoder(z_l_m, pos_ids_m, span_ids_m, key_padding_mask=seq_pad_mask_m)
+        z_hat_l_m = latent_decoder(z_prime_m, pos_ids_m, span_ids_m, key_padding_mask=seq_pad_mask_m)
+        logits_amtm = local_decoder(z_hat_l_m, source_m, base_pad_mask=base_pad_mask)
         l_amtm = local_decoder.loss(
             logits_amtm, input_ids, mask=mask_n, pad_id=self.pad_token_id,
         )
@@ -109,6 +117,7 @@ class LossManager:
         source_prime: torch.Tensor,
         source: torch.Tensor,
         K: int,
+        base_pad_mask: torch.Tensor,
     ) -> torch.Tensor:
         """Compute the AMTM mask via importance-weighted sampling (Sec 3.4).
 
@@ -120,6 +129,8 @@ class LossManager:
             source_prime: (B, K, N_orig) source matrix from pass 2 latent merge.
             source: (B, L, N_orig) source matrix from local encoder.
             K: number of latent tokens selected.
+            base_pad_mask: (B, N_orig) bool — ``True`` for real bases.
+                Padding positions are excluded from the sampling distribution.
 
         Returns:
             mask_n: (B, N) boolean base-level mask.
@@ -132,7 +143,10 @@ class LossManager:
             source_prime.float(),
         ).squeeze(1)  # (B, N_orig)
 
+        # Zero out padding positions so they are never sampled for masking.
         w_per_base = w_per_base.clamp(min=0)
+        w_per_base = w_per_base * base_pad_mask.float()
+
         total = w_per_base.sum(dim=-1, keepdim=True).clamp(min=1e-8)
         probs = w_per_base / total
 

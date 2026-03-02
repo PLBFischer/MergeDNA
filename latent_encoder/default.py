@@ -72,6 +72,7 @@ class LatentEncoder(nn.Module):
         z: torch.Tensor,
         pos_ids: Optional[torch.Tensor] = None,
         span_ids: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Run the full-attention stack without token merging (passes 1 and 3).
 
@@ -79,12 +80,13 @@ class LatentEncoder(nn.Module):
             z: (B, L, D) merged embeddings from the local encoder.
             pos_ids: (B, L) position ids.
             span_ids: (B, L) span lengths.
+            key_padding_mask: (B, L) bool — ``True`` = real token.
 
         Returns:
             z_prime: (B, L, D) contextualised latent embeddings.
         """
         for block in self.blocks:
-            z = block(z, self.rope_freqs, pos_ids, span_ids)
+            z = block(z, self.rope_freqs, pos_ids, span_ids, key_padding_mask=key_padding_mask)
         return self.norm(z)
 
     def forward_merged(
@@ -94,6 +96,8 @@ class LatentEncoder(nn.Module):
         pos_ids: torch.Tensor,
         span_ids: torch.Tensor,
         r_per_layer: Optional[List[int]] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
+        pad_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[int]]:
         """Full-attention stack with progressive adjacent-pair merging (pass 2).
 
@@ -108,6 +112,9 @@ class LatentEncoder(nn.Module):
             span_ids: (B, L) span lengths.
             r_per_layer: optional predetermined merge schedule. When ``None``
                 a new schedule is computed via ``_compute_r_per_layer``.
+            key_padding_mask: (B, L) bool — ``True`` = real token.
+            pad_mask: (B, N_orig) float — 1 for real bases, 0 for padding.
+                Forwarded to merge modules to deprioritise padding pairs.
 
         Returns:
             z_k: (B, K, D) compressed latent embeddings.
@@ -121,9 +128,13 @@ class LatentEncoder(nn.Module):
             r_per_layer = self._compute_r_per_layer(L)
 
         for layer_idx, (block, merge) in enumerate(zip(self.blocks, self.merge_modules)):
-            z = block(z, self.rope_freqs, pos_ids, span_ids)
+            z = block(z, self.rope_freqs, pos_ids, span_ids, key_padding_mask=key_padding_mask)
             r = r_per_layer[layer_idx] if layer_idx < len(r_per_layer) else 0
-            z, source, pos_ids, span_ids = merge(z, source, pos_ids, span_ids, r)
+            z, source, pos_ids, span_ids = merge(z, source, pos_ids, span_ids, r, pad_mask=pad_mask)
+            # Recompute current-position mask after merge.
+            if pad_mask is not None:
+                content = torch.bmm(source, pad_mask.unsqueeze(-1)).squeeze(-1)
+                key_padding_mask = content > 1e-6
 
         z = self.norm(z)
         return z, source, pos_ids, span_ids, r_per_layer

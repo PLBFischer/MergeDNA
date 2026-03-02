@@ -52,12 +52,16 @@ class LocalDecoder(nn.Module):
         self,
         z_hat_l: torch.Tensor,
         source: torch.Tensor,
+        base_pad_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Unmerge, refine, and project to logits.
 
         Args:
             z_hat_l: (B, L, D) latent-decoded merged embeddings.
             source: (B, L, N) source matrix (merged -> original positions).
+            base_pad_mask: (B, N) bool — ``True`` = real base position.
+                Used as ``key_padding_mask`` in the local-attention blocks
+                so that padding positions are invisible to real tokens.
 
         Returns:
             logits: (B, N, vocab_size) per-base vocabulary logits.
@@ -70,7 +74,7 @@ class LocalDecoder(nn.Module):
             .expand(z_n.shape[0], -1)
         )
         for block in self.blocks:
-            z_n = block(z_n, self.rope_freqs, base_pos)
+            z_n = block(z_n, self.rope_freqs, base_pos, key_padding_mask=base_pad_mask)
         return self.output_head(self.final_norm(z_n))
 
     def loss(

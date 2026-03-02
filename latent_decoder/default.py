@@ -46,6 +46,7 @@ class LatentDecoder(nn.Module):
         z: torch.Tensor,
         pos_ids: torch.Tensor,
         span_ids: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Run the latent decoder stack.
 
@@ -53,10 +54,11 @@ class LatentDecoder(nn.Module):
             z: (B, L, D) latent embeddings.
             pos_ids: (B, L) position ids.
             span_ids: (B, L) number of base tokens per merged token.
+            key_padding_mask: (B, L) bool — ``True`` = real token.
 
         Returns:
             z_hat: (B, L, D) reconstructed latent embeddings.
         """
         for block in self.blocks:
-            z = block(z, self.rope_freqs, pos_ids, span_ids)
+            z = block(z, self.rope_freqs, pos_ids, span_ids, key_padding_mask=key_padding_mask)
         return self.norm(z)

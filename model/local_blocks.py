@@ -51,9 +51,18 @@ class LocalToMeAttentionBlock(nn.Module):
         r: Union[int, torch.Tensor],
         rope_freqs: Optional[torch.Tensor] = None,
         pad_mask: Optional[torch.Tensor] = None,
+        seq_pad_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        x = x + self.span_enc(span_ids)
-        x = x + self.attn(self.norm1(x), rope_freqs, position_ids)
+        """
+        Args:
+            seq_pad_mask: (B, S) bool — ``True`` = real token at current
+                (possibly merged) positions.  Used for attention masking and
+                to zero-out SpanEncoding at padding positions.
+            pad_mask: (B, N_orig) float — 1 for real bases, 0 for padding.
+                Forwarded to the merge module to deprioritise padding pairs.
+        """
+        x = x + self.span_enc(span_ids, padding_mask=seq_pad_mask)
+        x = x + self.attn(self.norm1(x), rope_freqs, position_ids, key_padding_mask=seq_pad_mask)
         x = x + self.ffn(self.norm2(x))
         x, source, position_ids, span_ids = self.merge(
             x, source, position_ids, span_ids, r, pad_mask=pad_mask,
@@ -85,7 +94,8 @@ class LocalAttentionBlock(nn.Module):
         x: torch.Tensor,
         rope_freqs: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x), rope_freqs, position_ids)
+        x = x + self.attn(self.norm1(x), rope_freqs, position_ids, key_padding_mask=key_padding_mask)
         x = x + self.ffn(self.norm2(x))
         return x

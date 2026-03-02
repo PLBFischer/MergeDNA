@@ -222,7 +222,7 @@ def collect_span_lengths(
         input_ids = input_ids.to(device)
 
         with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
-            _, source, _, span_ids, _ = local_encoder(input_ids)
+            _, source, _, span_ids, _, _ = local_encoder(input_ids)
 
         # Mask out tokens whose content comes entirely from padding bases
         pad_mask = (input_ids != PAD_ID).float()                          # (B, N)
@@ -254,8 +254,8 @@ def extract_embeddings(
         input_ids = input_ids.to(device)
 
         with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
-            z_l, source, pos_ids, span_ids, _ = local_encoder(input_ids)
-            z_prime = latent_encoder(z_l, pos_ids, span_ids)
+            z_l, source, pos_ids, span_ids, _, seq_pad_mask = local_encoder(input_ids)
+            z_prime = latent_encoder(z_l, pos_ids, span_ids, key_padding_mask=seq_pad_mask)
 
         # Masked mean-pool: ignore merged tokens that stem entirely from padding
         pad_mask = (input_ids != PAD_ID).float()                         # (B, N)

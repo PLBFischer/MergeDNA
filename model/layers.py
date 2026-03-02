@@ -7,6 +7,8 @@ Foundational layers for MergeDNA.
 * ``SpanEncoding`` -- learned log-span conditioning.
 """
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -91,17 +93,27 @@ class SpanEncoding(nn.Module):
         super().__init__()
         self.proj = nn.Linear(1, dim, bias=True)
 
-    def forward(self, span_ids: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        span_ids: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """Project log span lengths into model dimension.
 
         Args:
             span_ids: (B, L) integer number of base tokens per merged token.
+            padding_mask: (B, L) bool — ``True`` = real token. When provided,
+                the output is zeroed at padding positions so that padding
+                tokens remain inert in the residual stream.
 
         Returns:
             (B, L, dim) span encoding to add to the residual stream.
         """
         log_span = torch.log1p(span_ids.float()).unsqueeze(-1)  # (B, L, 1)
-        return self.proj(log_span)
+        out = self.proj(log_span)
+        if padding_mask is not None:
+            out = out * padding_mask.unsqueeze(-1)
+        return out
 
 
 class SwiGLUFFN(nn.Module):
