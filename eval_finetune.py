@@ -124,6 +124,8 @@ _BENCHMARK_FASTA: dict[str, str] = {
     "drosophila_enhancers_stark":    "dm6.fa",
 }
 
+_HG38_BENCHMARKS = [k for k, v in _BENCHMARK_FASTA.items() if v == "hg38.fa"]
+
 _COMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
 
 
@@ -305,100 +307,38 @@ def fmt_time(seconds: float) -> str:
     return f"{h}h {m:02d}m {s:02d}s"
 
 
-# ──────────────────────────────── main ───────────────────────────────────────
+# ──────────────────────────── per-benchmark runner ───────────────────────────
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Fine-tune MergeDNA with LoRA + MLP head on genomic benchmarks",
-    )
-    parser.add_argument("--output_dir", type=str, required=True,
-                        help="Path to training output folder (checkpoints + config.yaml)")
-    parser.add_argument("--benchmark", type=str, default="human_nontata_promoters",
-                        help="Benchmark name (default: human_nontata_promoters)")
-    parser.add_argument("--fasta", type=str, default=None,
-                        help="Path to reference FASTA (auto-selected if omitted)")
-    parser.add_argument("--device", type=str, default=None)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--weight_decay", type=float, default=0.01)
-    parser.add_argument("--lora_rank", type=int, default=8)
-    parser.add_argument("--lora_alpha", type=float, default=16.0)
-    parser.add_argument("--mlp_hidden", type=int, default=512)
-    parser.add_argument("--mlp_dropout", type=float, default=0.1)
-    parser.add_argument("--warmup_steps", type=int, default=100)
-    parser.add_argument("--max_grad_norm", type=float, default=1.0)
-    parser.add_argument("--eval_batch_size", type=int, default=64)
-    parser.add_argument("--log_every", type=int, default=10,
-                        help="Print training loss every N steps")
-    parser.add_argument("--list_benchmarks", action="store_true",
-                        help="Print available benchmarks and exit")
-    args = parser.parse_args()
-
-    if args.list_benchmarks:
-        print("Available local genomic benchmarks:")
-        for name in list_local_benchmarks():
-            default_fa = _BENCHMARK_FASTA.get(name, "hg38.fa")
-            supported = "Y" if default_fa else "N (unsupported)"
-            print(f"  - {name}  [{default_fa or 'unsupported'}]  {supported}")
-        return
-
-    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+def run_benchmark(
+    benchmark_name: str,
+    fasta_path: Path,
+    cfg: dict,
+    ckpt: dict,
+    device: torch.device,
+    args,
+) -> dict:
+    """Fine-tune from scratch on a single benchmark.  Returns a results dict."""
     use_amp = device.type == "cuda"
-    print(f"Device: {device}  (AMP: {use_amp})")
-
-    # ── Config & models ──────────────────────────────────────────────────
-    cfg = load_resolved_config(args.output_dir)
     max_seq_len = cfg["experiment"]["max_seq_len"]
     embed_dim = cfg["experiment"]["embed_dim"]
-    print(f"Model: embed_dim={embed_dim}, max_seq_len={max_seq_len}")
 
+    # ── Fresh models from checkpoint ─────────────────────────────────────
     local_encoder, latent_encoder = build_models(cfg, device)
-
-    ckpt_path = find_latest_checkpoint(args.output_dir)
-    if ckpt_path is None:
-        sys.exit(f"No checkpoint found in {args.output_dir}")
-    print(f"Checkpoint: {ckpt_path}")
-
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     local_encoder.load_state_dict(ckpt["local_encoder"])
     latent_encoder.load_state_dict(ckpt["latent_encoder"])
-    print(f"  epoch={ckpt.get('epoch', '?')}  step={ckpt.get('global_step', '?')}")
 
-    # ── Freeze all pretrained parameters ─────────────────────────────────
     for p in local_encoder.parameters():
         p.requires_grad_(False)
     for p in latent_encoder.parameters():
         p.requires_grad_(False)
 
-    # ── Inject LoRA adapters ─────────────────────────────────────────────
-    n_lora_le = apply_lora(local_encoder, rank=args.lora_rank, alpha=args.lora_alpha)
-    n_lora_la = apply_lora(latent_encoder, rank=args.lora_rank, alpha=args.lora_alpha)
-    print(f"LoRA: rank={args.lora_rank}, alpha={args.lora_alpha}")
-    print(f"  Local encoder:  {n_lora_le} adapters")
-    print(f"  Latent encoder: {n_lora_la} adapters")
+    apply_lora(local_encoder, rank=args.lora_rank, alpha=args.lora_alpha)
+    apply_lora(latent_encoder, rank=args.lora_rank, alpha=args.lora_alpha)
 
-    # ── Benchmark data ───────────────────────────────────────────────────
-    print(f"\nBenchmark: {args.benchmark}")
-    if args.fasta:
-        fasta_path = Path(args.fasta)
-    else:
-        default_fa = _BENCHMARK_FASTA.get(args.benchmark)
-        if default_fa is None:
-            sys.exit(
-                f"Benchmark '{args.benchmark}' is not supported (mixed or transcript-based coords).\n"
-                f"Supported benchmarks: {[k for k, v in _BENCHMARK_FASTA.items() if v]}"
-            )
-        fasta_path = _REPO_ROOT / default_fa
-    if not fasta_path.exists():
-        sys.exit(
-            f"FASTA not found: {fasta_path}\n"
-            f"Download it and place it at that path, or pass --fasta <path>."
-        )
-
-    train_dset = LocalGenomicDataset(args.benchmark, "train", fasta_path=fasta_path)
-    test_dset = LocalGenomicDataset(args.benchmark, "test", fasta_path=fasta_path)
+    # ── Data ─────────────────────────────────────────────────────────────
+    train_dset = LocalGenomicDataset(benchmark_name, "train", fasta_path=fasta_path)
+    test_dset = LocalGenomicDataset(benchmark_name, "test", fasta_path=fasta_path)
     n_classes = len(set(train_dset.labels))
     print(f"  train={len(train_dset)}  test={len(test_dset)}  classes={n_classes}")
 
@@ -424,7 +364,7 @@ def main():
     all_modules = [local_encoder, latent_encoder, mlp_head]
     total_p = sum(count_params(m)[0] for m in all_modules)
     trainable_p = sum(count_params(m)[1] for m in all_modules)
-    print(f"\nParameters: {total_p:,} total, {trainable_p:,} trainable "
+    print(f"  Parameters: {total_p:,} total, {trainable_p:,} trainable "
           f"({100 * trainable_p / total_p:.2f}%)")
 
     # ── Optimizer & scheduler ────────────────────────────────────────────
@@ -446,17 +386,17 @@ def main():
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     # ── Training loop ────────────────────────────────────────────────────
-    print(f"\nTraining: {args.epochs} epochs, {len(train_loader)} steps/epoch, "
+    print(f"  Training: {args.epochs} epochs, {len(train_loader)} steps/epoch, "
           f"{total_steps} total steps")
     print(f"  batch_size={args.batch_size}  lr={args.lr}  warmup={warmup}  "
           f"weight_decay={args.weight_decay}")
-    print(f"{'=' * 72}")
 
     local_encoder.train()
     latent_encoder.train()
     global_step = 0
     train_t0 = time.time()
     best_test_acc = 0.0
+    best_test_f1 = 0.0
 
     for epoch in range(1, args.epochs + 1):
         epoch_t0 = time.time()
@@ -489,15 +429,12 @@ def main():
             if step % args.log_every == 0 or step == len(train_loader):
                 elapsed = time.time() - train_t0
                 steps_left = total_steps - global_step
-                if global_step > 0:
-                    eta = elapsed / global_step * steps_left
-                else:
-                    eta = 0.0
+                eta = elapsed / max(1, global_step) * steps_left
                 running_acc = epoch_correct / epoch_total
                 running_loss = epoch_loss / epoch_total
                 lr_now = scheduler.get_last_lr()[0]
                 print(
-                    f"  [{epoch}/{args.epochs}] step {step}/{len(train_loader)}  "
+                    f"    [{epoch}/{args.epochs}] step {step}/{len(train_loader)}  "
                     f"loss={running_loss:.4f}  acc={running_acc:.4f}  "
                     f"lr={lr_now:.2e}  "
                     f"elapsed={fmt_time(elapsed)}  eta={fmt_time(eta)}",
@@ -515,7 +452,7 @@ def main():
 
         test_correct = 0
         test_total = 0
-        test_loss = 0.0
+        test_loss_sum = 0.0
         all_preds = []
         all_labels = []
 
@@ -529,30 +466,29 @@ def main():
 
                 preds = logits.argmax(dim=-1)
                 bs = labels.size(0)
-                test_loss += loss.item() * bs
+                test_loss_sum += loss.item() * bs
                 test_correct += (preds == labels).sum().item()
                 test_total += bs
                 all_preds.append(preds.cpu().numpy())
                 all_labels.append(labels.cpu().numpy())
 
         test_acc = test_correct / test_total
-        test_loss = test_loss / test_total
-        all_preds = np.concatenate(all_preds)
-        all_labels = np.concatenate(all_labels)
-        test_f1 = f1_score(all_labels, all_preds, average="macro")
+        test_loss = test_loss_sum / test_total
+        all_preds_np = np.concatenate(all_preds)
+        all_labels_np = np.concatenate(all_labels)
+        test_f1 = f1_score(all_labels_np, all_preds_np, average="macro")
 
-        is_best = test_acc > best_test_acc
-        if is_best:
+        if test_acc > best_test_acc:
             best_test_acc = test_acc
-        marker = " *best*" if is_best else ""
+            best_test_f1 = test_f1
+        marker = " *best*" if test_acc >= best_test_acc else ""
 
         print(
-            f"  Epoch {epoch} done in {fmt_time(epoch_time)}  |  "
+            f"    Epoch {epoch} done in {fmt_time(epoch_time)}  |  "
             f"train loss={train_loss:.4f} acc={train_acc:.4f}  |  "
             f"test loss={test_loss:.4f} acc={test_acc:.4f} F1={test_f1:.4f}{marker}",
             flush=True,
         )
-        print(f"{'-' * 72}")
 
         local_encoder.train()
         latent_encoder.train()
@@ -564,19 +500,6 @@ def main():
     local_encoder.eval()
     latent_encoder.eval()
     mlp_head.eval()
-
-    all_preds_train, all_labels_train = [], []
-    with torch.no_grad():
-        for input_ids, labels in train_loader:
-            labels = labels.to(device)
-            with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
-                emb = forward_embed(local_encoder, latent_encoder, input_ids, device)
-                logits = mlp_head(emb)
-            all_preds_train.append(logits.argmax(dim=-1).cpu().numpy())
-            all_labels_train.append(labels.cpu().numpy())
-
-    y_train = np.concatenate(all_labels_train)
-    y_pred_train = np.concatenate(all_preds_train)
 
     all_preds_test, all_labels_test = [], []
     with torch.no_grad():
@@ -591,14 +514,146 @@ def main():
     y_test = np.concatenate(all_labels_test)
     y_pred_test = np.concatenate(all_preds_test)
 
-    print(f"\n{'=' * 72}")
-    print(f"  {args.benchmark}  (LoRA + MLP fine-tuning)")
-    print(f"{'=' * 72}")
-    print(f"  Training time  : {fmt_time(total_time)}")
-    print(f"  Train accuracy : {accuracy_score(y_train, y_pred_train):.4f}")
-    print(f"  Test accuracy  : {accuracy_score(y_test, y_pred_test):.4f}")
-    print(f"  Test F1 (macro): {f1_score(y_test, y_pred_test, average='macro'):.4f}")
+    final_acc = accuracy_score(y_test, y_pred_test)
+    final_f1 = f1_score(y_test, y_pred_test, average="macro")
+
+    print(f"\n  {benchmark_name} — final results:")
+    print(f"    Test accuracy  : {final_acc:.4f}")
+    print(f"    Test F1 (macro): {final_f1:.4f}")
+    print(f"    Best test acc  : {best_test_acc:.4f}  (best F1: {best_test_f1:.4f})")
+    print(f"    Training time  : {fmt_time(total_time)}")
     print(f"\n{classification_report(y_test, y_pred_test)}")
+
+    # Free GPU memory before next benchmark
+    del local_encoder, latent_encoder, mlp_head, optimizer, scaler
+    torch.cuda.empty_cache() if device.type == "cuda" else None
+
+    return {
+        "benchmark": benchmark_name,
+        "n_classes": n_classes,
+        "train_size": len(train_dset),
+        "test_size": len(test_dset),
+        "best_test_acc": best_test_acc,
+        "best_test_f1": best_test_f1,
+        "final_test_acc": final_acc,
+        "final_test_f1": final_f1,
+        "time": total_time,
+    }
+
+
+# ──────────────────────────────── main ───────────────────────────────────────
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Fine-tune MergeDNA with LoRA + MLP head on genomic benchmarks",
+    )
+    parser.add_argument("--output_dir", type=str, required=True,
+                        help="Path to training output folder (checkpoints + config.yaml)")
+    parser.add_argument("--benchmark", type=str, default="human_nontata_promoters",
+                        help="Benchmark name, or 'all_hg38' to run all hg38 benchmarks "
+                             "(default: human_nontata_promoters)")
+    parser.add_argument("--fasta", type=str, default=None,
+                        help="Path to reference FASTA (auto-selected if omitted)")
+    parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--weight_decay", type=float, default=0.01)
+    parser.add_argument("--lora_rank", type=int, default=8)
+    parser.add_argument("--lora_alpha", type=float, default=16.0)
+    parser.add_argument("--mlp_hidden", type=int, default=512)
+    parser.add_argument("--mlp_dropout", type=float, default=0.1)
+    parser.add_argument("--warmup_steps", type=int, default=100)
+    parser.add_argument("--max_grad_norm", type=float, default=1.0)
+    parser.add_argument("--eval_batch_size", type=int, default=64)
+    parser.add_argument("--log_every", type=int, default=10,
+                        help="Print training loss every N steps")
+    parser.add_argument("--list_benchmarks", action="store_true",
+                        help="Print available benchmarks and exit")
+    args = parser.parse_args()
+
+    if args.list_benchmarks:
+        print("Available local genomic benchmarks:")
+        for name in list_local_benchmarks():
+            default_fa = _BENCHMARK_FASTA.get(name, "hg38.fa")
+            supported = "Y" if default_fa else "N (unsupported)"
+            print(f"  - {name}  [{default_fa or 'unsupported'}]  {supported}")
+        return
+
+    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    use_amp = device.type == "cuda"
+    print(f"Device: {device}  (AMP: {use_amp})")
+
+    # ── Config & checkpoint (loaded once, reused across benchmarks) ───────
+    cfg = load_resolved_config(args.output_dir)
+    max_seq_len = cfg["experiment"]["max_seq_len"]
+    embed_dim = cfg["experiment"]["embed_dim"]
+    print(f"Model: embed_dim={embed_dim}, max_seq_len={max_seq_len}")
+
+    ckpt_path = find_latest_checkpoint(args.output_dir)
+    if ckpt_path is None:
+        sys.exit(f"No checkpoint found in {args.output_dir}")
+    print(f"Checkpoint: {ckpt_path}")
+
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    print(f"  epoch={ckpt.get('epoch', '?')}  step={ckpt.get('global_step', '?')}")
+    print(f"LoRA: rank={args.lora_rank}, alpha={args.lora_alpha}")
+
+    # ── Resolve benchmark list ───────────────────────────────────────────
+    if args.benchmark == "all_hg38":
+        benchmarks = _HG38_BENCHMARKS
+        print(f"\nRunning all hg38 benchmarks: {benchmarks}")
+    else:
+        benchmarks = [args.benchmark]
+
+    # ── Resolve FASTA ────────────────────────────────────────────────────
+    all_results = []
+    total_t0 = time.time()
+
+    for bench_idx, benchmark_name in enumerate(benchmarks, 1):
+        print(f"\n{'=' * 72}")
+        print(f"  [{bench_idx}/{len(benchmarks)}] {benchmark_name}")
+        print(f"{'=' * 72}")
+
+        if args.fasta:
+            fasta_path = Path(args.fasta)
+        else:
+            default_fa = _BENCHMARK_FASTA.get(benchmark_name)
+            if default_fa is None:
+                print(f"  SKIPPING: unsupported (mixed or transcript-based coords)")
+                continue
+            fasta_path = _REPO_ROOT / default_fa
+        if not fasta_path.exists():
+            print(f"  SKIPPING: FASTA not found at {fasta_path}")
+            continue
+
+        result = run_benchmark(
+            benchmark_name=benchmark_name,
+            fasta_path=fasta_path,
+            cfg=cfg,
+            ckpt=ckpt,
+            device=device,
+            args=args,
+        )
+        all_results.append(result)
+
+    # ── Summary table ────────────────────────────────────────────────────
+    if len(all_results) > 1:
+        total_time = time.time() - total_t0
+        print(f"\n{'=' * 72}")
+        print(f"  SUMMARY  (LoRA + MLP fine-tuning, {len(all_results)} benchmarks)")
+        print(f"{'=' * 72}")
+        print(f"  {'Benchmark':<32s}  {'Acc':>6s}  {'F1':>6s}  {'Best Acc':>8s}  {'Time':>8s}")
+        print(f"  {'-' * 32}  {'-' * 6}  {'-' * 6}  {'-' * 8}  {'-' * 8}")
+        for r in all_results:
+            print(f"  {r['benchmark']:<32s}  {r['final_test_acc']:6.4f}  {r['final_test_f1']:6.4f}"
+                  f"  {r['best_test_acc']:8.4f}  {fmt_time(r['time']):>8s}")
+        mean_acc = np.mean([r["final_test_acc"] for r in all_results])
+        mean_f1 = np.mean([r["final_test_f1"] for r in all_results])
+        print(f"  {'-' * 32}  {'-' * 6}  {'-' * 6}  {'-' * 8}  {'-' * 8}")
+        print(f"  {'MEAN':<32s}  {mean_acc:6.4f}  {mean_f1:6.4f}")
+        print(f"\n  Total wall time: {fmt_time(total_time)}")
 
 
 if __name__ == "__main__":
