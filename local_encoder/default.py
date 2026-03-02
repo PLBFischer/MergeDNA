@@ -86,19 +86,13 @@ class LocalEncoder(nn.Module):
         else:
             ratio = self.compression_ratio_mean
 
-        # Use the minimum content length in the batch to compute a single
-        # total_to_remove that is safe for all sequences.  Every sequence
-        # compresses at least as much as the shortest one requires; longer
-        # sequences are very slightly under-compressed (by at most a few tokens)
-        # but all produce the same output length, keeping tensor shapes fixed.
-        min_content = int(content_lengths.min().item())
-        L_target = max(1, int(min_content * ratio))
-        total_to_remove = min_content - L_target
+        L_targets = (content_lengths.float() * ratio).long().clamp(min=1)   # (B,)
+        total_to_remove = content_lengths - L_targets                         # (B,)
 
-        base = total_to_remove // self.num_layers
-        remainder = total_to_remove - base * self.num_layers
+        base = total_to_remove // self.num_layers                             # (B,)
+        remainder = total_to_remove - base * self.num_layers                  # (B,)
 
-        r_schedule = content_lengths.new_full((B, self.num_layers), base)
+        r_schedule = base.unsqueeze(1).expand(B, self.num_layers).clone()
         r_schedule[:, -1] += remainder
 
         return r_schedule

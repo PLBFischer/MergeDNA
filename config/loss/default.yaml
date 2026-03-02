@@ -2,5 +2,4 @@
 
 _target_: loss.default.LossManager
 lambda_latent_mtr: 0.25
-target_latent_compression: 0.5
 pad_token_id: ${pad_token_id}

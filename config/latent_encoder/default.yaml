@@ -7,3 +7,4 @@ ffn_dim: ${experiment.ffn_dim}
 num_layers: ${experiment.latent_encoder_num_layers}
 merge_group_dim: 64
 max_seq_len: ${experiment.max_seq_len}
+compression_ratio: 0.5

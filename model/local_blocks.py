@@ -2,6 +2,8 @@
 
 * ``LocalToMeAttentionBlock`` -- local-window attention followed by
   differentiable token merging (used in Local Encoder).
+* ``FullToMeAttentionBlock`` -- full self-attention followed by
+  differentiable token merging (used in Latent Encoder).
 * ``LocalAttentionBlock`` -- local-window attention without merging
   (used in Local Decoder).
 """
@@ -57,6 +59,51 @@ class LocalToMeAttentionBlock(nn.Module):
         x = x + self.ffn(self.norm2(x))
         x, source, position_ids, span_ids = self.merge(
             x, source, position_ids, span_ids, r, pad_mask=pad_mask,
+        )
+        return x, source, position_ids, span_ids
+
+
+class FullToMeAttentionBlock(nn.Module):
+    """Full self-attention + differentiable token merging.
+
+    Mirrors LocalToMeAttentionBlock but uses full (non-windowed) attention.
+    Used in the Latent Encoder.
+
+    Each forward pass:
+      1. Pre-norm full self-attention
+      2. Pre-norm SwiGLU FFN
+      3. Token merging (reduces sequence length by *r* adjacent pairs)
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        ffn_dim: int,
+        merge_group_dim: int = 64,
+    ):
+        super().__init__()
+        self.span_enc = SpanEncoding(dim)
+        self.norm1 = RMSNorm(dim)
+        self.attn = Attention(dim, num_heads)
+        self.norm2 = RMSNorm(dim)
+        self.ffn = SwiGLUFFN(dim, ffn_dim)
+        self.merge = TokenMergeModule(dim, merge_group_dim)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        source: torch.Tensor,
+        position_ids: torch.Tensor,
+        span_ids: torch.Tensor,
+        r: Union[int, torch.Tensor],
+        rope_freqs: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        x = x + self.span_enc(span_ids)
+        x = x + self.attn(self.norm1(x), rope_freqs, position_ids)
+        x = x + self.ffn(self.norm2(x))
+        x, source, position_ids, span_ids = self.merge(
+            x, source, position_ids, span_ids, r,
         )
         return x, source, position_ids, span_ids
 
