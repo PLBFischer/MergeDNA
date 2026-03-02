@@ -57,10 +57,22 @@ class LatentEncoder(nn.Module):
         ])
         self.norm = RMSNorm(embed_dim)
 
-    def _compute_r_per_layer(self, L: int) -> List[int]:
-        """Compute a uniform per-layer merge schedule for L → K tokens."""
-        K = max(1, int(L * self.compression_ratio))
-        total_to_remove = L - K
+    def _compute_r_per_layer(self, L: int, L_real: Optional[int] = None) -> List[int]:
+        """Compute a uniform per-layer merge schedule.
+
+        The compression ratio is applied to *L_real* (the number of
+        real-content tokens) rather than the full padded length *L*,
+        so padding never inflates the merge budget.
+
+        Args:
+            L: total sequence length (real + padding-derived tokens).
+            L_real: number of real-content tokens.  When ``None``,
+                falls back to ``L`` (no padding in the sequence).
+        """
+        if L_real is None:
+            L_real = L
+        K = max(1, int(L_real * self.compression_ratio))
+        total_to_remove = L_real - K
         base = total_to_remove // self.num_layers
         remainder = total_to_remove - base * self.num_layers
         r_per_layer = [base] * self.num_layers
@@ -125,7 +137,8 @@ class LatentEncoder(nn.Module):
         """
         _, L, _ = z.shape
         if r_per_layer is None:
-            r_per_layer = self._compute_r_per_layer(L)
+            L_real = int(key_padding_mask.sum(dim=-1).min().item()) if key_padding_mask is not None else None
+            r_per_layer = self._compute_r_per_layer(L, L_real)
 
         for layer_idx, (block, merge) in enumerate(zip(self.blocks, self.merge_modules)):
             z = block(z, self.rope_freqs, pos_ids, span_ids, key_padding_mask=key_padding_mask)
