@@ -82,7 +82,8 @@ class Trainer:
             scheduler: LR scheduler (stepped every gradient update).
             loss_manager: LossManager instance.
             output_dir: directory for checkpoints.
-            config: optional OmegaConf DictConfig (stored in checkpoints).
+            config: optional OmegaConf DictConfig (accepted for forward
+                compatibility but not currently used by the trainer).
 
         Returns:
             (output_dir, stats) tuple.

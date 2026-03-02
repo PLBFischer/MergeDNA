@@ -10,8 +10,10 @@ Pass 1 (MTR):        local N→L, latent L→L (no merge), reconstruct N.
 Pass 2 (Latent MTR): local encoder frozen; latent L→K via progressive
                      adjacent-pair merging spread across all layers;
                      unmerge K→L, reconstruct N.  Produces source_prime.
-Pass 3 (AMTM):       mask base tokens guided by source_prime; local N→L,
-                     latent L→L (no merge), reconstruct masked N.
+Pass 3 (AMTM):       importance-weighted mask over L local tokens (derived
+                     from the K→L source matrix source_kl); expand to base
+                     level, then local N→L, latent L→L (no merge),
+                     reconstruct masked positions.
 """
 
 import torch

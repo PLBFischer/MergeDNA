@@ -12,9 +12,10 @@ class LocalToMeAttentionBlock(nn.Module):
     """Local-window attention + differentiable token merging.
 
     Each forward pass:
-      1. Pre-norm local-window self-attention
-      2. Pre-norm SwiGLU FFN
-      3. Token merging (reduces sequence length by *r* pairs per window)
+      1. Add span encoding (log-scale merged-token length)
+      2. Pre-norm local-window self-attention
+      3. Pre-norm SwiGLU FFN
+      4. Token merging (reduces sequence length by *r* adjacent pairs)
     """
 
     def __init__(

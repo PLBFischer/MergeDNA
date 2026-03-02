@@ -142,14 +142,14 @@ class TokenMergeModule(nn.Module):
                     used.add(i)
                     used.add(j)
 
-        keep_i = torch.tensor(sel_i, device=x.device)  # (K,)
-        drop_j = torch.tensor(sel_j, device=x.device)  # (K,)
+        keep_i = torch.tensor(sel_i, device=x.device)  # (r,)
+        drop_j = torch.tensor(sel_j, device=x.device)  # (r,)
 
         # Vectorized weighted merge.
         # index_put is out-of-place and differentiable through both x and the
         # merged values, unlike clone() + in-place indexed assignment.
-        w_i = norms[keep_i].unsqueeze(-1)               # (K, 1)
-        w_j = norms[drop_j].unsqueeze(-1)               # (K, 1)
+        w_i = norms[keep_i].unsqueeze(-1)               # (r, 1)
+        w_j = norms[drop_j].unsqueeze(-1)               # (r, 1)
         merged_x = (w_i * x[keep_i] + w_j * x[drop_j]) / (w_i + w_j + 1e-8)
         x_out = x.index_put((keep_i,), merged_x)
 
