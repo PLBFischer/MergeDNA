@@ -44,7 +44,7 @@ class LatentDecoder(nn.Module):
     def forward(
         self,
         z: torch.Tensor,
-        pos_ids: Optional[torch.Tensor] = None,
+        pos_ids: torch.Tensor,
         span_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Run the latent decoder stack.

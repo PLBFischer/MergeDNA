@@ -28,10 +28,6 @@ class LossManager:
         self.lambda_latent_mtr = lambda_latent_mtr
         self.pad_token_id = pad_token_id
 
-    def _unwrap(self, module):
-        """Access the underlying module when DDP-wrapped."""
-        return module.module if hasattr(module, "module") else module
-
     def loss(self, local_encoder, latent_encoder, latent_decoder, local_decoder, batch, device):
         """Run the three-pass pre-training forward and compute combined loss.
 
@@ -54,7 +50,7 @@ class LossManager:
         z_prime = latent_encoder(z_l, pos_ids, span_ids)
         z_hat_l = latent_decoder(z_prime, pos_ids, span_ids)
         logits_mtr = local_decoder(z_hat_l, source)
-        l_mtr = self._unwrap(local_decoder).loss(
+        l_mtr = local_decoder.loss(
             logits_mtr, input_ids, pad_id=self.pad_token_id,
         )
 
@@ -64,7 +60,7 @@ class LossManager:
 
         # Progressive L→K merging with phi frozen; produces source_prime used
         # in pass 3 to compute the AMTM mask.
-        z_k, source_prime, _, _, _ = self._unwrap(latent_encoder).forward_merged(
+        z_k, source_prime, _, _, _ = latent_encoder.forward_merged(
             z_l_detached, source_detached, pos_ids, span_ids,
         )
 
@@ -75,7 +71,7 @@ class LossManager:
 
         z_hat_l_2 = latent_decoder(z_l_2, pos_ids, span_ids)
         logits_latent_mtr = local_decoder(z_hat_l_2, source_detached)
-        l_latent_mtr = self._unwrap(local_decoder).loss(
+        l_latent_mtr = local_decoder.loss(
             logits_latent_mtr, input_ids, pad_id=self.pad_token_id,
         )
 
@@ -92,7 +88,7 @@ class LossManager:
         z_prime_m = latent_encoder(z_l_m, pos_ids_m, span_ids_m)
         z_hat_l_m = latent_decoder(z_prime_m, pos_ids_m, span_ids_m)
         logits_amtm = local_decoder(z_hat_l_m, source_m)
-        l_amtm = self._unwrap(local_decoder).loss(
+        l_amtm = local_decoder.loss(
             logits_amtm, input_ids, mask=mask_n, pad_id=self.pad_token_id,
         )
 
