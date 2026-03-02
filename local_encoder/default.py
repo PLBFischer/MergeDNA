@@ -73,7 +73,6 @@ class LocalEncoder(nn.Module):
 
         L_target = max(1, int(N * ratio))
         total_to_remove = N - L_target
-        W = self.local_window_size
 
         r_per_layer: List[int] = []
         current_len = N

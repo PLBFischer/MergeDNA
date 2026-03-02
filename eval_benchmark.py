@@ -200,6 +200,42 @@ def _collate(batch, max_seq_len):
     return input_ids, torch.tensor(labels, dtype=torch.long)
 
 
+# ─────────────────────── span-length analysis ───────────────────────────────
+
+
+@torch.no_grad()
+def collect_span_lengths(
+    local_encoder: LocalEncoder,
+    dataloader: DataLoader,
+    device: torch.device,
+) -> np.ndarray:
+    """Return a 1-D array of merged-token span lengths (bases per token)
+    for every content token across all sequences in *dataloader*.
+
+    span_ids[b, l] is the number of original base tokens that were merged
+    into latent token l.  Tokens that cover only padding are excluded.
+    """
+    local_encoder.eval()
+    all_spans: list[np.ndarray] = []
+
+    for input_ids, _ in dataloader:
+        input_ids = input_ids.to(device)
+
+        with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
+            _, source, _, span_ids, _ = local_encoder(input_ids)
+
+        # Mask out tokens whose content comes entirely from padding bases
+        pad_mask = (input_ids != PAD_ID).float()                          # (B, N)
+        content  = torch.bmm(source, pad_mask.unsqueeze(-1)).squeeze(-1)  # (B, L)
+        token_mask = content > 1e-6                                        # (B, L)
+
+        for b in range(input_ids.size(0)):
+            spans = span_ids[b][token_mask[b]].cpu().numpy()  # (n_content_tokens,)
+            all_spans.append(spans)
+
+    return np.concatenate(all_spans)
+
+
 # ─────────────────────── embedding extraction ───────────────────────────────
 
 
@@ -252,6 +288,9 @@ def main():
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--list_benchmarks", action="store_true",
                         help="Print available benchmarks and exit")
+    parser.add_argument("--save_spans", type=str, default=None, metavar="PATH",
+                        help="If set, collect merged-token span lengths (bases/token) for the "
+                             "positive class of human_nontata_promoters and save to PATH (.npz)")
     args = parser.parse_args()
 
     if args.list_benchmarks:
@@ -336,6 +375,36 @@ def main():
     print(f"  Test accuracy  : {accuracy_score(y_test, y_pred_test):.4f}")
     print(f"  Test F1 (macro): {f1_score(y_test, y_pred_test, average='macro'):.4f}")
     print(f"\n{classification_report(y_test, y_pred_test)}")
+
+    # ── Span-length analysis (promoter sequences only) ──
+    if args.save_spans:
+        print("\nCollecting span lengths for human_nontata_promoters positive (train + test) …")
+        hg38 = _REPO_ROOT / "hg38.fa"
+        pos_train = LocalGenomicDataset(
+            "human_nontata_promoters", "train", fasta_path=hg38,
+        )
+        pos_test = LocalGenomicDataset(
+            "human_nontata_promoters", "test", fasta_path=hg38,
+        )
+        # Keep only the positive class (label 1: positive.csv.gz)
+        pos_train_seqs = [(s, l) for s, l in pos_train if l == 1]
+        pos_test_seqs  = [(s, l) for s, l in pos_test  if l == 1]
+        all_pos = pos_train_seqs + pos_test_seqs
+        print(f"  {len(all_pos)} promoter sequences")
+
+        pos_loader = DataLoader(
+            all_pos,
+            batch_size=args.batch_size,
+            collate_fn=lambda batch: _collate(batch, max_seq_len),
+            num_workers=2,
+        )
+        span_lengths = collect_span_lengths(local_encoder, pos_loader, device)
+
+        out_path = Path(args.save_spans)
+        np.savez(out_path, span_lengths=span_lengths)
+        print(f"  Saved {len(span_lengths):,} token span lengths → {out_path}")
+        print(f"  mean={span_lengths.mean():.2f}  median={np.median(span_lengths):.0f}"
+              f"  min={span_lengths.min()}  max={span_lengths.max()}")
 
 
 if __name__ == "__main__":
