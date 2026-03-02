@@ -4,7 +4,7 @@ Loss manager for MergeDNA pre-training.
 Orchestrates the three-pass forward (Sec 3.4, Eq. 8) and combines the
 three loss terms:
 
-  L_total = L_MTR(theta) + lambda * L_MTR(theta \\ {phi}) + L_AMTM(theta)
+  L_total = L_MTR(theta) + lambda * L_MTR(theta \\ {phi}) + lambda_amtm * L_AMTM(theta)
 
 Pass 1 (MTR):        local N→L, latent L→L (no merge), reconstruct N.
 Pass 2 (Latent MTR): local encoder frozen; latent L→K via progressive
@@ -25,10 +25,12 @@ class LossManager:
     def __init__(
         self,
         lambda_latent_mtr: float = 0.25,
+        lambda_amtm: float = 1.0,
         pad_token_id: int = 0,
         mask_token_id: int = 6,
     ):
         self.lambda_latent_mtr = lambda_latent_mtr
+        self.lambda_amtm = lambda_amtm
         self.pad_token_id = pad_token_id
         self.mask_token_id = mask_token_id
 
@@ -105,7 +107,7 @@ class LossManager:
         )
 
         # ---- Combined loss (Eq. 8) ----
-        total = l_mtr + self.lambda_latent_mtr * l_latent_mtr + l_amtm
+        total = l_mtr + self.lambda_latent_mtr * l_latent_mtr + self.lambda_amtm * l_amtm
 
         losses = {
             "loss_mtr": l_mtr.detach(),

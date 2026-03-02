@@ -1,0 +1,6 @@
+# @package _global_.dataset
+
+_target_: dataset.synthetic_structured.SyntheticStructuredDNADataset
+num_sequences: 100000
+dataset_len: 10000
+seed: 42

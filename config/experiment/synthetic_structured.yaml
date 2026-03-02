@@ -1,0 +1,20 @@
+# @package _global_.experiment
+
+name: synth_structured
+
+defaults:
+  - /dataset: synthetic_structured
+  - /scheduler: nano
+  - /training: default1000_pll
+
+embed_dim: 256
+max_seq_len: 64
+num_heads: 8
+ffn_dim: 768
+
+local_window_size: 16
+
+local_encoder_num_layers: 4
+local_decoder_num_layers: 2
+latent_encoder_num_layers: 6
+latent_decoder_num_layers: 2
