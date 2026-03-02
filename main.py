@@ -18,6 +18,7 @@ import wandb
 from omegaconf import DictConfig, OmegaConf
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from utils.hash_utils import get_output_dir
 
@@ -65,12 +66,15 @@ def main(cfg: DictConfig):
     try:
         # ---- Dataset and DataLoader ----
         dataset = hydra.utils.instantiate(cfg.dataset)
+        sampler = DistributedSampler(dataset) if distributed else None
         dataloader = DataLoader(
             dataset,
             batch_size=cfg.training.per_gpu_batch_size,
             num_workers=4,
             pin_memory=True,
             drop_last=True,
+            sampler=sampler,
+            shuffle=(sampler is None),
         )
 
         # ---- Model components ----
@@ -85,6 +89,8 @@ def main(cfg: DictConfig):
             latent_encoder = DDP(latent_encoder, device_ids=[local_rank], **ddp_kwargs)
             latent_decoder = DDP(latent_decoder, device_ids=[local_rank], **ddp_kwargs)
             local_decoder = DDP(local_decoder, device_ids=[local_rank], **ddp_kwargs)
+            for m in (local_encoder, latent_encoder, latent_decoder, local_decoder):
+                m._set_static_graph()
 
         # ---- Optimizer and Scheduler ----
         model_parameters = (
@@ -118,6 +124,7 @@ def main(cfg: DictConfig):
             output_dir=output_dir,
             config=cfg,
             use_wandb=use_wandb,
+            sampler=sampler,
         )
 
         if is_main:

@@ -72,6 +72,7 @@ class Trainer:
         output_dir: str = "./outputs",
         config=None,
         use_wandb: bool = False,
+        sampler=None,
     ):
         """Run the full pre-training loop.
 
@@ -137,6 +138,8 @@ class Trainer:
         t0 = time.time()
 
         for epoch in range(start_epoch, self.total_epochs):
+            if sampler is not None:
+                sampler.set_epoch(epoch)
             for batch_idx, batch in enumerate(dataloader):
                 optimizer.zero_grad(set_to_none=True)
 

@@ -3,8 +3,9 @@
 name: mini
 
 defaults:
-  - /dataset: mini
-  - /scheduler: mini
+  - /dataset: mini_pll
+  - /scheduler: mini_pll
+  - /training: default1000_pll
 
 embed_dim: 256
 max_seq_len: 512
@@ -13,7 +14,7 @@ ffn_dim: 768
 
 local_window_size: 16
 
-local_encoder_num_layers: 3
+local_encoder_num_layers: 4
 local_decoder_num_layers: 2
-latent_encoder_num_layers: 5
+latent_encoder_num_layers: 6
 latent_decoder_num_layers: 2

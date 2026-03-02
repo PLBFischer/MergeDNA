@@ -1,6 +1,6 @@
 # @package _global_.experiment
 
-name: big
+name: big_multi
 
 defaults:
   - override /dataset@_global_.dataset: default

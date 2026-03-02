@@ -1,0 +1,7 @@
+# @package _global_.scheduler
+
+_target_: training.get_cosine_schedule_with_warmup
+_partial_: true
+warmup_steps: 10000
+total_steps: 781000
+min_lr_ratio: 0.1
