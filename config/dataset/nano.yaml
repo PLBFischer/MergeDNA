@@ -1,0 +1,6 @@
+# @package _global_.dataset
+
+_target_: dataset.default.DNADataset
+fasta_path: "hg38.fa"
+max_seq_len: ${experiment.max_seq_len}
+dataset_len: 5000

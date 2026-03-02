@@ -17,5 +17,6 @@ defaults:
 seed: 42
 
 # Shared architecture constants (referenced by component configs via ${...})
-vocab_size: 6
+vocab_size: 7
 pad_token_id: 0
+mask_token_id: 6

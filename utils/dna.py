@@ -2,6 +2,7 @@ import torch
 
 NUCLEOTIDE_MAP = {"A": 1, "a": 1, "T": 2, "t": 2, "C": 3, "c": 3, "G": 4, "g": 4, "N": 5, "n": 5}
 PAD_ID = 0
+MASK_ID = 6
 
 
 def encode_sequence(seq: str, max_len: int) -> torch.Tensor:

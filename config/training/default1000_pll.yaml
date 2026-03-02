@@ -1,7 +1,7 @@
 _target_: training.Trainer
 total_epochs: 1000
 log_interval: 50
-save_every_n_epochs: 5
+save_every_n_epochs: 1
 grad_clip: 1.0
 per_gpu_batch_size: 128
 amp_dtype: bfloat16  # float16, bfloat16, or null to disable

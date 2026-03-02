@@ -24,9 +24,11 @@ class LossManager:
         self,
         lambda_latent_mtr: float = 0.25,
         pad_token_id: int = 0,
+        mask_token_id: int = 6,
     ):
         self.lambda_latent_mtr = lambda_latent_mtr
         self.pad_token_id = pad_token_id
+        self.mask_token_id = mask_token_id
 
     def loss(self, local_encoder, latent_encoder, latent_decoder, local_decoder, batch, device):
         """Run the three-pass pre-training forward and compute combined loss.
@@ -80,7 +82,7 @@ class LossManager:
         mask_n = self._compute_amtm_mask(source_prime, source, K)
 
         masked_ids = input_ids.clone()
-        masked_ids[mask_n] = self.pad_token_id
+        masked_ids[mask_n] = self.mask_token_id
 
         z_l_m, source_m, pos_ids_m, span_ids_m, _ = local_encoder(
             masked_ids, r_per_layer=r_per_layer,
