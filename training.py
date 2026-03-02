@@ -38,10 +38,7 @@ def get_cosine_schedule_with_warmup(
 
 
 class Trainer:
-    """Epoch-based trainer for MergeDNA pre-training.
-
-    Compatible with distributed (DDP) and single-GPU workflows.
-    """
+    """Epoch-based trainer for MergeDNA pre-training."""
 
     def __init__(
         self,
@@ -72,15 +69,14 @@ class Trainer:
         output_dir: str = "./outputs",
         config=None,
         use_wandb: bool = False,
-        sampler=None,
     ):
         """Run the full pre-training loop.
 
         Args:
-            local_encoder: LocalEncoder module (possibly DDP-wrapped).
-            latent_encoder: LatentEncoder module (possibly DDP-wrapped).
-            latent_decoder: LatentDecoder module (possibly DDP-wrapped).
-            local_decoder: LocalDecoder module (possibly DDP-wrapped).
+            local_encoder: LocalEncoder module.
+            latent_encoder: LatentEncoder module.
+            latent_decoder: LatentDecoder module.
+            local_decoder: LocalDecoder module.
             dataloader: DataLoader yielding batches of token-id tensors.
             optimizer: configured optimizer over all model parameters.
             scheduler: LR scheduler (stepped every gradient update).
@@ -138,8 +134,6 @@ class Trainer:
         t0 = time.time()
 
         for epoch in range(start_epoch, self.total_epochs):
-            if sampler is not None:
-                sampler.set_epoch(epoch)
             for batch_idx, batch in enumerate(dataloader):
                 optimizer.zero_grad(set_to_none=True)
 
@@ -239,8 +233,7 @@ class Trainer:
         if scaler is not None:
             state["scaler"] = scaler.state_dict()
         for name, comp in components.items():
-            module = comp.module if hasattr(comp, "module") else comp
-            state[name] = module.state_dict()
+            state[name] = comp.state_dict()
 
         torch.save(state, path)
         self.logger.info(f"Saved checkpoint to {path}")
@@ -274,9 +267,8 @@ class Trainer:
         ckpt = torch.load(best_path, map_location="cpu", weights_only=False)
 
         for name, comp in components.items():
-            module = comp.module if hasattr(comp, "module") else comp
             if name in ckpt:
-                module.load_state_dict(ckpt[name])
+                comp.load_state_dict(ckpt[name])
 
         if "optimizer" in ckpt:
             optimizer.load_state_dict(ckpt["optimizer"])

@@ -27,18 +27,14 @@ class LossManager:
         self.target_latent_compression = target_latent_compression
         self.pad_token_id = pad_token_id
 
-    def _unwrap(self, module):
-        """Access the underlying module when DDP-wrapped."""
-        return module.module if hasattr(module, "module") else module
-
     def loss(self, local_encoder, latent_encoder, latent_decoder, local_decoder, batch, device):
         """Run the three-pass pre-training forward and compute combined loss.
 
         Args:
-            local_encoder: LocalEncoder (possibly DDP-wrapped).
-            latent_encoder: LatentEncoder (possibly DDP-wrapped).
-            latent_decoder: LatentDecoder (possibly DDP-wrapped).
-            local_decoder: LocalDecoder (possibly DDP-wrapped).
+            local_encoder: LocalEncoder.
+            latent_encoder: LatentEncoder.
+            latent_decoder: LatentDecoder.
+            local_decoder: LocalDecoder.
             batch: tensor of token ids from the dataloader.
             device: torch device to place the batch on.
 
@@ -53,7 +49,7 @@ class LossManager:
         z_prime = latent_encoder(z_l, pos_ids, span_ids)
         z_hat_l = latent_decoder(z_prime, pos_ids, span_ids)
         logits_mtr = local_decoder(z_hat_l, source)
-        l_mtr = self._unwrap(local_decoder).loss(
+        l_mtr = local_decoder.loss(
             logits_mtr, input_ids, pad_id=self.pad_token_id,
         )
 
@@ -65,7 +61,7 @@ class LossManager:
         # Step 2: latent encoder forward pass, then merge L → K.
         z_prime_2 = latent_encoder(z_l_detached, pos_ids, span_ids)
         K = max(1, int(z_l_detached.shape[1] * self.target_latent_compression))
-        z_k, source_prime, _, span_ids_k = self._unwrap(latent_encoder).merge(
+        z_k, source_prime, _, span_ids_k = latent_encoder.merge(
             z_prime_2, source_detached, pos_ids, span_ids, K,
         )
 
@@ -81,7 +77,7 @@ class LossManager:
 
         # Step 5: local decoder unmerges L → N and produces logits.
         logits_latent_mtr = local_decoder(z_hat_l_2, source_detached)
-        l_latent_mtr = self._unwrap(local_decoder).loss(
+        l_latent_mtr = local_decoder.loss(
             logits_latent_mtr, input_ids, pad_id=self.pad_token_id,
         )
 
@@ -97,7 +93,7 @@ class LossManager:
         z_prime_m = latent_encoder(z_l_m, pos_ids_m, span_ids_m)
         z_hat_l_m = latent_decoder(z_prime_m, pos_ids_m, span_ids_m)
         logits_amtm = local_decoder(z_hat_l_m, source_m)
-        l_amtm = self._unwrap(local_decoder).loss(
+        l_amtm = local_decoder.loss(
             logits_amtm, input_ids, mask=mask_n, pad_id=self.pad_token_id,
         )
 
