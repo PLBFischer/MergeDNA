@@ -42,7 +42,7 @@ MergeDNA/
 ├── training.py                # Trainer class + cosine-warmup LR scheduler
 ├── config/
 │   ├── config.yaml            # Root Hydra config
-│   ├── experiment/            # Experiment presets (nano, mini, default, …)
+│   ├── experiment/            # Experiment presets (nano, default, synthetic)
 │   ├── dataset/               # Dataset configs (FASTA, synthetic, …)
 │   ├── local_encoder/         # Local encoder hyperparameters
 │   ├── latent_encoder/        # Latent encoder hyperparameters
@@ -137,7 +137,6 @@ python plot_spans.py spans.npz
 | Config | Embed dim | Seq len | Local Enc | Latent Enc | Latent Dec | Local Dec |
 |--------|-----------|---------|-----------|------------|------------|-----------|
 | `nano` | 256 | 512 | 4 layers | 6 layers | 2 layers | 2 layers |
-| `mini` | 256 | 512 | 4 layers | 6 layers | 2 layers | 2 layers |
 | `default` | 1024 | 4096 | 4 layers | 20 layers | 4 layers | 2 layers |
 
 ## Token Vocabulary
