@@ -11,8 +11,8 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from model.layers import RMSNorm, precompute_rope_freqs
-from model.transformer_block import TransformerBlock
+from src.utils import RMSNorm, precompute_rope_freqs
+from src.transformer_block import TransformerBlock
 
 
 class LatentDecoder(nn.Module):

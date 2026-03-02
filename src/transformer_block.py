@@ -8,8 +8,8 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from model.attention import Attention
-from model.layers import RMSNorm, SpanEncoding, SwiGLUFFN
+from src.attention import Attention
+from src.utils import RMSNorm, SpanEncoding, SwiGLUFFN
 
 
 class TransformerBlock(nn.Module):

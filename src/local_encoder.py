@@ -11,8 +11,8 @@ from typing import List, Optional, Tuple
 import torch
 import torch.nn as nn
 
-from model.layers import RMSNorm, precompute_rope_freqs
-from model.local_blocks import LocalToMeAttentionBlock
+from src.utils import RMSNorm, precompute_rope_freqs
+from src.local_blocks import LocalToMeAttentionBlock
 
 
 class LocalEncoder(nn.Module):

@@ -52,16 +52,16 @@ MergeDNA/
 │   ├── scheduler/             # LR schedule settings
 │   ├── loss/                  # Loss manager config (lambda, token IDs)
 │   └── wandb/                 # Weights & Biases logging config
-├── model/
+├── src/
 │   ├── attention.py           # Multi-head attention (full + sliding-window)
-│   ├── layers.py              # RMSNorm, RoPE, SpanEncoding, SwiGLU FFN
+│   ├── utils.py               # RMSNorm, RoPE, SpanEncoding, SwiGLU FFN
 │   ├── transformer_block.py   # Pre-norm Transformer block (full attention)
 │   ├── local_blocks.py        # Local attention blocks (with/without merging)
-│   └── token_merge.py         # TokenMergeModule + token_unmerge
-├── local_encoder/default.py   # Local Encoder (learnable tokeniser)
-├── latent_encoder/default.py  # Latent Encoder (global context model)
-├── latent_decoder/default.py  # Latent Decoder (token-level reconstruction)
-├── local_decoder/default.py   # Local Decoder (base-level detokeniser)
+│   ├── token_merge.py         # TokenMergeModule + token_unmerge
+│   ├── local_encoder.py       # Local Encoder (learnable tokeniser)
+│   ├── latent_encoder.py      # Latent Encoder (global context model)
+│   ├── latent_decoder.py      # Latent Decoder (token-level reconstruction)
+│   └── local_decoder.py       # Local Decoder (base-level detokeniser)
 ├── loss/default.py            # LossManager (3-pass forward, Eq. 8)
 ├── dataset/
 │   ├── default.py             # DNADataset (loads FASTA files)
@@ -70,8 +70,8 @@ MergeDNA/
 ├── utils/
 │   ├── dna.py                 # Nucleotide encoding (A=1, T=2, C=3, G=4, N=5)
 │   └── hash_utils.py          # Config hashing for deterministic output dirs
-├── eval_benchmark.py          # Linear-probe evaluation (logistic regression)
 ├── eval_finetune.py           # LoRA + MLP head fine-tuning evaluation
+├── eval_vocab_merge.py        # Vocabulary merge analysis
 └── plot_spans.py              # Visualise merged-token span length distribution
 ```
 
@@ -98,12 +98,6 @@ python main.py experiment=nano training.total_epochs=500 optimizer.lr=5e-5
 
 ### Evaluation
 
-**Linear probe** (frozen encoder, logistic regression on mean-pooled embeddings):
-
-```bash
-python eval_benchmark.py --output_dir outputs/<run_dir> --benchmark human_nontata_promoters
-```
-
 **LoRA fine-tuning** (low-rank adapters + MLP classification head):
 
 ```bash
@@ -119,15 +113,22 @@ python eval_finetune.py --output_dir outputs/<run_dir> --benchmark all_hg38
 List available benchmarks:
 
 ```bash
-python eval_benchmark.py --output_dir outputs/<run_dir> --list_benchmarks
+python eval_finetune.py --output_dir outputs/<run_dir> --list_benchmarks
 ```
 
-### Span Length Analysis
+### Vocabulary Merge Analysis
 
-Collect and plot the distribution of bases per merged token:
+Evaluate whether the local encoder's merging boundaries align with synthetic k-mer fragment boundaries:
 
 ```bash
-python eval_benchmark.py --output_dir outputs/<run_dir> --save_spans spans.npz
+python eval_vocab_merge.py --output_dir outputs/<run_dir>
+```
+
+### Span Length Visualisation
+
+Plot the distribution of bases per merged token:
+
+```bash
 python plot_spans.py spans.npz
 ```
 

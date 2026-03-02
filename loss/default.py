@@ -18,7 +18,7 @@ Pass 3 (AMTM):       importance-weighted mask over L local tokens (derived
 
 import torch
 
-from model.token_merge import token_unmerge
+from src.token_merge import token_unmerge
 
 
 class LossManager:

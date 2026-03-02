@@ -1,6 +1,6 @@
 # @package _global_.local_encoder
 
-_target_: local_encoder.default.LocalEncoder
+_target_: src.local_encoder.LocalEncoder
 vocab_size: ${vocab_size}
 pad_token_id: ${pad_token_id}
 embed_dim: ${experiment.embed_dim}

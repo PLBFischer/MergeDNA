@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.layers import apply_rope
+from src.utils import apply_rope
 
 
 class Attention(nn.Module):

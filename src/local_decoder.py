@@ -13,9 +13,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.layers import RMSNorm, precompute_rope_freqs
-from model.local_blocks import LocalAttentionBlock
-from model.token_merge import token_unmerge
+from src.utils import RMSNorm, precompute_rope_freqs
+from src.local_blocks import LocalAttentionBlock
+from src.token_merge import token_unmerge
 
 
 class LocalDecoder(nn.Module):

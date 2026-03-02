@@ -3,9 +3,9 @@ from typing import Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from model.attention import Attention
-from model.layers import RMSNorm, SpanEncoding, SwiGLUFFN
-from model.token_merge import TokenMergeModule
+from src.attention import Attention
+from src.utils import RMSNorm, SpanEncoding, SwiGLUFFN
+from src.token_merge import TokenMergeModule
 
 
 class LocalToMeAttentionBlock(nn.Module):

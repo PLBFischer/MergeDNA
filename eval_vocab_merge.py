@@ -37,7 +37,7 @@ from scipy import stats as sp_stats
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from local_encoder.default import LocalEncoder
+from src.local_encoder import LocalEncoder
 from utils.dna import encode_sequence
 
 BASES = "ATCG"

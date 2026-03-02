@@ -17,9 +17,9 @@ from typing import List, Optional, Tuple
 import torch
 import torch.nn as nn
 
-from model.layers import RMSNorm, precompute_rope_freqs
-from model.token_merge import TokenMergeModule
-from model.transformer_block import TransformerBlock
+from src.utils import RMSNorm, precompute_rope_freqs
+from src.token_merge import TokenMergeModule
+from src.transformer_block import TransformerBlock
 
 
 class LatentEncoder(nn.Module):

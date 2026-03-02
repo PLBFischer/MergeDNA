@@ -34,8 +34,8 @@ from torch.utils.data import DataLoader, Dataset
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from local_encoder.default import LocalEncoder
-from latent_encoder.default import LatentEncoder
+from src.local_encoder import LocalEncoder
+from src.latent_encoder import LatentEncoder
 from utils.dna import NUCLEOTIDE_MAP, PAD_ID
 
 
