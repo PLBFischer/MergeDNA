@@ -6,9 +6,12 @@ three loss terms:
 
   L_total = L_MTR(theta) + lambda * L_MTR(theta \\ {phi}) + L_AMTM(theta)
 
-The LossManager receives the four model components and a batch, runs
-all three forward passes, and returns the total loss along with a
-breakdown dictionary for logging.
+Pass 1 (MTR):        local N→L, latent L→L (no merge), reconstruct N.
+Pass 2 (Latent MTR): local encoder frozen; latent L→K via progressive
+                     adjacent-pair merging spread across all layers;
+                     unmerge K→L, reconstruct N.  Produces source_prime.
+Pass 3 (AMTM):       mask base tokens guided by source_prime; local N→L,
+                     latent L→L (no merge), reconstruct masked N.
 """
 
 import torch
@@ -47,14 +50,10 @@ class LossManager:
         input_ids = batch.to(device)
 
         # ---- Pass 1: Merged Token Reconstruction (MTR, Eq. 6) ----
-        # local encoder: N → L
         z_l, source, pos_ids, span_ids, r_per_layer = local_encoder(input_ids)
-        # latent encoder: L → K (progressive merging)
-        z_prime, source_prime, pos_ids_k, span_ids_k, le_r_per_layer = latent_encoder(
-            z_l, source, pos_ids, span_ids,
-        )
-        z_hat = latent_decoder(z_prime, pos_ids_k, span_ids_k)
-        logits_mtr = local_decoder(z_hat, source_prime)
+        z_prime = latent_encoder(z_l, pos_ids, span_ids)
+        z_hat_l = latent_decoder(z_prime, pos_ids, span_ids)
+        logits_mtr = local_decoder(z_hat_l, source)
         l_mtr = self._unwrap(local_decoder).loss(
             logits_mtr, input_ids, pad_id=self.pad_token_id,
         )
@@ -63,16 +62,16 @@ class LossManager:
         z_l_detached = z_l.detach()
         source_detached = source.detach()
 
-        # Latent encoder with phi frozen; reuse same merge schedule for consistency.
-        z_k_2, source_prime_2, _, _ , _ = latent_encoder(
+        # Progressive L→K merging with phi frozen; produces source_prime used
+        # in pass 3 to compute the AMTM mask.
+        z_k, source_prime, _, _, _ = self._unwrap(latent_encoder).forward_merged(
             z_l_detached, source_detached, pos_ids, span_ids,
-            r_per_layer=le_r_per_layer,
         )
 
-        # Unmerge K → L: source_prime_2 (B, K, N) @ source_detached^T (B, N, L) = (B, K, L)
-        overlap = torch.bmm(source_prime_2.float(), source_detached.float().transpose(1, 2))
+        # Unmerge K → L: source_prime (B, K, N) @ source_detached^T (B, N, L) = (B, K, L)
+        overlap = torch.bmm(source_prime.float(), source_detached.float().transpose(1, 2))
         source_kl = (overlap > 0.5).float()   # (B, K, L)
-        z_l_2 = token_unmerge(z_k_2, source_kl)  # (B, L, D)
+        z_l_2 = token_unmerge(z_k, source_kl)  # (B, L, D)
 
         z_hat_l_2 = latent_decoder(z_l_2, pos_ids, span_ids)
         logits_latent_mtr = local_decoder(z_hat_l_2, source_detached)
@@ -87,15 +86,12 @@ class LossManager:
         masked_ids = input_ids.clone()
         masked_ids[mask_n] = self.pad_token_id
 
-        # Reuse both merge schedules so token positions are consistent with Pass 1.
         z_l_m, source_m, pos_ids_m, span_ids_m, _ = local_encoder(
             masked_ids, r_per_layer=r_per_layer,
         )
-        z_prime_m, source_prime_m, pos_ids_km, span_ids_km, _ = latent_encoder(
-            z_l_m, source_m, pos_ids_m, span_ids_m, r_per_layer=le_r_per_layer,
-        )
-        z_hat_m = latent_decoder(z_prime_m, pos_ids_km, span_ids_km)
-        logits_amtm = local_decoder(z_hat_m, source_prime_m)
+        z_prime_m = latent_encoder(z_l_m, pos_ids_m, span_ids_m)
+        z_hat_l_m = latent_decoder(z_prime_m, pos_ids_m, span_ids_m)
+        logits_amtm = local_decoder(z_hat_l_m, source_m)
         l_amtm = self._unwrap(local_decoder).loss(
             logits_amtm, input_ids, mask=mask_n, pad_id=self.pad_token_id,
         )
@@ -123,9 +119,9 @@ class LossManager:
         fine-grained regions.
 
         Args:
-            source_prime: (B, K, N_orig) source matrix from latent encoder.
+            source_prime: (B, K, N_orig) source matrix from pass 2 latent merge.
             source: (B, L, N_orig) source matrix from local encoder.
-            K: number of latent tokens.
+            K: number of latent tokens selected.
 
         Returns:
             mask_n: (B, N) boolean base-level mask.

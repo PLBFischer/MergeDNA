@@ -1,14 +1,15 @@
 """
 Latent Encoder -- global context modelling for MergeDNA.
 
-Processes the merged local tokens (L) through a deep stack of
-FullToMeAttentionBlocks, progressively merging them down to K tokens —
-analogous to how the Local Encoder merges N base tokens down to L.
+``forward`` runs the full-attention stack without any token merging (used
+in pre-training passes 1 and 3).
 
-Each block performs full self-attention followed by adjacent-pair token
-merging.  The encoder outputs a source_prime matrix (B, K, N_orig) that
-tracks which original base positions feed into each latent token, used
-by the AMTM loss in pre-training pass 3.
+``forward_merged`` additionally applies a per-layer TokenMergeModule after
+each TransformerBlock, progressively compressing L tokens down to K using
+the same uniform adjacent-pair merge schedule as the Local Encoder (used
+in pre-training pass 2).  It returns the source_prime matrix that tracks
+which original base positions belong to each latent token; this matrix
+drives the AMTM mask in pass 3.
 """
 
 from typing import List, Optional, Tuple
@@ -17,7 +18,8 @@ import torch
 import torch.nn as nn
 
 from model.layers import RMSNorm, precompute_rope_freqs
-from model.local_blocks import FullToMeAttentionBlock
+from model.token_merge import TokenMergeModule
+from model.transformer_block import TransformerBlock
 
 
 class LatentEncoder(nn.Module):
@@ -41,12 +43,16 @@ class LatentEncoder(nn.Module):
         )
 
         self.blocks = nn.ModuleList([
-            FullToMeAttentionBlock(
+            TransformerBlock(
                 dim=embed_dim,
                 num_heads=num_heads,
                 ffn_dim=ffn_dim,
-                merge_group_dim=merge_group_dim,
             )
+            for _ in range(num_layers)
+        ])
+        # One TokenMergeModule per layer; only used in forward_merged (pass 2).
+        self.merge_modules = nn.ModuleList([
+            TokenMergeModule(embed_dim, merge_group_dim)
             for _ in range(num_layers)
         ])
         self.norm = RMSNorm(embed_dim)
@@ -64,12 +70,36 @@ class LatentEncoder(nn.Module):
     def forward(
         self,
         z: torch.Tensor,
+        pos_ids: Optional[torch.Tensor] = None,
+        span_ids: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Run the full-attention stack without token merging (passes 1 and 3).
+
+        Args:
+            z: (B, L, D) merged embeddings from the local encoder.
+            pos_ids: (B, L) position ids.
+            span_ids: (B, L) span lengths.
+
+        Returns:
+            z_prime: (B, L, D) contextualised latent embeddings.
+        """
+        for block in self.blocks:
+            z = block(z, self.rope_freqs, pos_ids, span_ids)
+        return self.norm(z)
+
+    def forward_merged(
+        self,
+        z: torch.Tensor,
         source: torch.Tensor,
         pos_ids: torch.Tensor,
         span_ids: torch.Tensor,
         r_per_layer: Optional[List[int]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[int]]:
-        """Progressively merge local tokens into latent tokens.
+        """Full-attention stack with progressive adjacent-pair merging (pass 2).
+
+        Each layer runs its TransformerBlock then reduces the sequence by r
+        adjacent-pair merges, distributing the total compression budget
+        uniformly — identical in spirit to how the Local Encoder merges N→L.
 
         Args:
             z: (B, L, D) merged embeddings from the local encoder.
@@ -80,7 +110,7 @@ class LatentEncoder(nn.Module):
                 a new schedule is computed via ``_compute_r_per_layer``.
 
         Returns:
-            z_prime: (B, K, D) latent token embeddings.
+            z_k: (B, K, D) compressed latent embeddings.
             source_prime: (B, K, N_orig) source matrix mapping latent -> original positions.
             pos_ids_k: (B, K) position ids of kept tokens.
             span_ids_k: (B, K) span lengths of kept tokens.
@@ -90,11 +120,10 @@ class LatentEncoder(nn.Module):
         if r_per_layer is None:
             r_per_layer = self._compute_r_per_layer(L)
 
-        for layer_idx, block in enumerate(self.blocks):
+        for layer_idx, (block, merge) in enumerate(zip(self.blocks, self.merge_modules)):
+            z = block(z, self.rope_freqs, pos_ids, span_ids)
             r = r_per_layer[layer_idx] if layer_idx < len(r_per_layer) else 0
-            z, source, pos_ids, span_ids = block(
-                z, source, pos_ids, span_ids, r=r, rope_freqs=self.rope_freqs,
-            )
+            z, source, pos_ids, span_ids = merge(z, source, pos_ids, span_ids, r)
 
         z = self.norm(z)
         return z, source, pos_ids, span_ids, r_per_layer
