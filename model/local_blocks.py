@@ -50,11 +50,14 @@ class LocalToMeAttentionBlock(nn.Module):
         span_ids: torch.Tensor,
         r: int,
         rope_freqs: Optional[torch.Tensor] = None,
+        pad_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         x = x + self.span_enc(span_ids)
         x = x + self.attn(self.norm1(x), rope_freqs, position_ids)
         x = x + self.ffn(self.norm2(x))
-        x, source, position_ids, span_ids = self.merge(x, source, position_ids, span_ids, r)
+        x, source, position_ids, span_ids = self.merge(
+            x, source, position_ids, span_ids, r, pad_mask=pad_mask,
+        )
         return x, source, position_ids, span_ids
 
 

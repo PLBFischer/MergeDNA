@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -18,6 +18,7 @@ class TokenMergeModule(nn.Module):
         position_ids: torch.Tensor,
         span_ids: torch.Tensor,
         r: int,
+        pad_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Merge *r* adjacent token pairs.
 
@@ -28,6 +29,10 @@ class TokenMergeModule(nn.Module):
             position_ids: (B, S) absolute position indices for each token.
             span_ids: (B, S) number of base tokens in each merged token.
             r: number of pairs to merge.
+            pad_mask: (B, N_orig) float mask — 1 for real bases, 0 for padding.
+                When provided, pairs where either token is entirely padding-derived
+                are given similarity -2 so they are never selected before real
+                content pairs.
 
         Returns:
             x_merged: (B, S', D)
@@ -45,6 +50,14 @@ class TokenMergeModule(nn.Module):
         g_norm = F.normalize(g, dim=-1)
         g_norms = g.norm(dim=-1)         # (B, S)
         sim = (g_norm[:, :-1] * g_norm[:, 1:]).sum(-1)  # (B, S-1)
+
+        # Deprioritise pairs where either token is purely padding-derived so
+        # the compression budget is spent on real sequence content first.
+        if pad_mask is not None:
+            content = torch.bmm(source, pad_mask.unsqueeze(-1)).squeeze(-1)  # (B, S)
+            is_pad = content < 1e-6                                            # (B, S)
+            pair_is_pad = is_pad[:, :-1] | is_pad[:, 1:]                      # (B, S-1)
+            sim = sim.masked_fill(pair_is_pad, -2.0)
 
         # --- Per-batch greedy selection + simultaneous merge ----------------
         results_x, results_s, results_p, results_sp = [], [], [], []

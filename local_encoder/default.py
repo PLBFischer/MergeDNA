@@ -74,16 +74,11 @@ class LocalEncoder(nn.Module):
         L_target = max(1, int(N * ratio))
         total_to_remove = N - L_target
 
-        r_per_layer: List[int] = []
-        current_len = N
-        for i in range(self.num_layers):
-            remaining_layers = self.num_layers - i
-            remove_this_layer = total_to_remove // remaining_layers
-            r = max(0, min(remove_this_layer, current_len // 2))
-            total_to_remove -= r
-            current_len -= r
-            r_per_layer.append(r)
+        base = total_to_remove // self.num_layers
+        remainder = total_to_remove - base * self.num_layers
 
+        r_per_layer = [base] * self.num_layers
+        r_per_layer[-1] += remainder
         return r_per_layer
 
     def forward(
@@ -123,10 +118,16 @@ class LocalEncoder(nn.Module):
         )
         span_ids = torch.ones(B, N, dtype=torch.long, device=x.device)
 
+        # Real-base mask: 1 for content positions, 0 for padding.
+        # Kept at original length N throughout; source handles the mapping
+        # as tokens are merged across layers.
+        pad_mask = (input_ids != self.token_embed.padding_idx).float()  # (B, N)
+
         for layer_idx, block in enumerate(self.blocks):
             r = r_per_layer[layer_idx] if layer_idx < len(r_per_layer) else 0
             x, source, pos_ids, span_ids = block(
                 x, source, pos_ids, span_ids, r=r, rope_freqs=self.rope_freqs,
+                pad_mask=pad_mask,
             )
 
         x = self.norm(x)
